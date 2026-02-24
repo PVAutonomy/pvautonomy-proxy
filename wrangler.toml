@@ -1,0 +1,25 @@
+name = "pvautonomy-proxy"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+
+[vars]
+GITHUB_OWNER = "PVAutonomy"
+GITHUB_REPO = "inverter-registry"
+GITHUB_WORKFLOW_FILE = "build-firmware-on-demand.yml"
+MAX_BUILDS_PER_DAY = "10"
+MAX_PAYLOAD_BYTES = "65536"
+BUILD_TIMEOUT_MS = "900000"
+
+# KV namespaces — IDs set after `wrangler kv:namespace create`
+[[kv_namespaces]]
+binding = "BUILD_STATE"
+id = "PLACEHOLDER_BUILD_STATE_ID"
+preview_id = "PLACEHOLDER_BUILD_STATE_PREVIEW_ID"
+
+[[kv_namespaces]]
+binding = "API_KEYS"
+id = "PLACEHOLDER_API_KEYS_ID"
+preview_id = "PLACEHOLDER_API_KEYS_PREVIEW_ID"
+
+# Secrets (set via `wrangler secret put`):
+# GITHUB_PAT — Fine-grained PAT with actions:write on PVAutonomy/inverter-registry
