@@ -24,6 +24,7 @@ export interface BuildRecord {
   artifact: ArtifactInfo | null;
   error: string | null;
   payload_hash: string;
+  payload: BuildPayload | null;
 }
 
 export interface ArtifactInfo {

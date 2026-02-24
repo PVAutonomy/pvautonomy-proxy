@@ -58,6 +58,7 @@ const baseBuild: BuildRecord = {
   artifact: null,
   error: null,
   payload_hash: "abc123",
+  payload: { registry_file: "inverters/growatt/sph/sph10k.json", device_name: "sph10k-haus-03" },
 };
 
 describe("handleBuildStatus", () => {

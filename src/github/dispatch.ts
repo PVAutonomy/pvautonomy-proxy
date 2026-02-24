@@ -20,18 +20,18 @@ export async function triggerWorkflowDispatch(
 ): Promise<DispatchResult> {
   const url = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${env.GITHUB_WORKFLOW_FILE}/dispatches`;
 
+  // Only send inputs the workflow currently accepts.
+  // build_id + encrypted_secrets will be added in C1 (workflow contract update).
+  const inputs: Record<string, string> = {
+    registry_file: payload.registry_file,
+    device_name: payload.device_name,
+    version: payload.version || "",
+  };
+
   const body = {
     ref: "main",
     return_run_details: true,
-    inputs: {
-      registry_file: payload.registry_file,
-      device_name: payload.device_name,
-      version: payload.version || "",
-      build_id: buildId,
-      ...(payload.encrypted_secrets
-        ? { encrypted_secrets: payload.encrypted_secrets }
-        : {}),
-    },
+    inputs,
   };
 
   const response = await fetch(url, {
@@ -47,11 +47,26 @@ export async function triggerWorkflowDispatch(
 
   // New API (return_run_details: true) → 200 with run details
   if (response.status === 200) {
-    const data = (await response.json()) as {
-      id: number;
-      html_url: string;
-    };
-    return { run_id: data.id, run_url: data.html_url };
+    const data = (await response.json()) as Record<string, unknown>;
+
+    // The run object may be at top level or nested under a key.
+    // Robustly extract run_id and html_url.
+    const htmlUrl = (data.html_url ?? data.url ?? "") as string;
+    let runId = typeof data.id === "number" ? data.id : 0;
+
+    // Fallback: parse run_id from URL (.../actions/runs/12345)
+    if (!runId && htmlUrl) {
+      const match = htmlUrl.match(/\/runs\/(\d+)/);
+      if (match) runId = parseInt(match[1], 10);
+    }
+
+    if (!runId) {
+      throw new Error(
+        `GitHub returned 200 but no run_id found. Response keys: ${Object.keys(data).join(",")}`,
+      );
+    }
+
+    return { run_id: runId, run_url: htmlUrl };
   }
 
   // Legacy 204 (shouldn't happen with return_run_details)

@@ -73,6 +73,7 @@ export async function handleBuildCreate(
     artifact: null,
     error: null,
     payload_hash: await sha256(body),
+    payload: req.payload,
   };
 
   // 7. Dispatch to GitHub Actions

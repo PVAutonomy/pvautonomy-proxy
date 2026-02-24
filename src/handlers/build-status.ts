@@ -36,7 +36,6 @@ export async function handleBuildStatus(
       // Check build timeout
       const elapsed = Date.now() - new Date(record.created_at).getTime();
       const timeoutMs = parseInt(
-        // env vars may not exist in test; default 15 min
         (typeof env.BUILD_TIMEOUT_MS === "string" ? env.BUILD_TIMEOUT_MS : null) ?? "900000",
       );
       if (elapsed > timeoutMs) {
@@ -71,7 +70,7 @@ export async function handleBuildStatus(
 
       await persistRecord(env, record);
     } catch {
-      // GitHub API temporarily unavailable — return stale data
+      // Poll failure is non-fatal; return last known state
     }
   }
 
