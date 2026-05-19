@@ -83,6 +83,7 @@ describe("triggerWorkflowDispatch", () => {
         "registry_file",
         "version",
         "yaml_content",
+        "yaml_hash",
       ].sort(),
     );
     expect(inputs.registry_file).toBe("inverters/growatt/sph/sph10k.json");
@@ -93,6 +94,7 @@ describe("triggerWorkflowDispatch", () => {
     // Optional fields default to empty string so the workflow input defaults apply.
     expect(inputs.build_contract).toBe("");
     expect(inputs.yaml_content).toBe("");
+    expect(inputs.yaml_hash).toBe("");
     expect(inputs.encrypted_secrets).toBe("");
     expect(inputs.compile_secret_envelope).toBe("");
     expect(inputs.ota_required).toBe("");
@@ -124,13 +126,15 @@ describe("triggerWorkflowDispatch", () => {
     expect(inputs.ota_required).toBe("1");
   });
 
-  it("does NOT forward yaml_hash yet (workflow input not declared at current HEAD)", async () => {
-    // EPIC-006-B7: yaml_hash is validated at the proxy edge but not yet
-    // dispatched to the workflow. The Repo-2 workflow PR adds the input;
-    // a follow-up commit then turns on dispatch forwarding.
+  it("forwards yaml_hash on the yaml_authority path (end-to-end binding)", async () => {
+    // EPIC-006-B7 follow-up: now that inverter-registry#7 added the
+    // yaml_hash workflow input and the fail-closed compare step, the
+    // proxy forwards yaml_hash so the runner can verify the bytes it
+    // decoded match the hash HA computed.
     const fetchMock = mockFetchOnce();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
+    const expectedHash = "b".repeat(64);
     await triggerWorkflowDispatch(
       createEnv(),
       "build-uuid-3",
@@ -138,7 +142,7 @@ describe("triggerWorkflowDispatch", () => {
       legacyPayload({
         build_contract: "yaml_authority",
         yaml_content: Buffer.from("esphome:\n  name: x\n").toString("base64"),
-        yaml_hash: "b".repeat(64),
+        yaml_hash: expectedHash,
       }),
     );
 
@@ -146,7 +150,9 @@ describe("triggerWorkflowDispatch", () => {
       lastInputs: Record<string, string>;
     }).lastInputs;
 
-    expect(inputs).not.toHaveProperty("yaml_hash");
+    expect(inputs).toHaveProperty("yaml_hash");
+    expect(inputs.yaml_hash).toBe(expectedHash);
+    expect(inputs.build_contract).toBe("yaml_authority");
   });
 
   it("forwards encrypted_secrets on legacy secret path", async () => {
