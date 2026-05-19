@@ -369,4 +369,85 @@ describe("validateBuildRequest", () => {
     expect(err).toContain("payload.secret_context_hash");
     expect(err).toContain("string");
   });
+
+  // ── EPIC-006-B7 hotfix #3: ota_required boolean/string ────────────────
+
+  it("accepts ota_required as boolean true (HA-native wire shape)", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, ota_required: true },
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts ota_required as boolean false", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, ota_required: false },
+      }),
+    ).toBeNull();
+  });
+
+  it.each([
+    ["empty string", ""],
+    ["string 0", "0"],
+    ["string 1", "1"],
+    ["lowercase true", "true"],
+    ["lowercase false", "false"],
+    ["uppercase TRUE", "TRUE"],
+    ["mixed-case True", "True"],
+  ])(
+    "accepts ota_required as canonical string (%s)",
+    (_label: string, value: string) => {
+      expect(
+        validateBuildRequest({
+          ...validRequest,
+          payload: { ...validRequest.payload, ota_required: value },
+        }),
+      ).toBeNull();
+    },
+  );
+
+  it("rejects ota_required string outside the canonical set", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: { ...validRequest.payload, ota_required: "yes" },
+    });
+    expect(err).toContain("payload.ota_required");
+    expect(err).toContain("case-insensitive");
+  });
+
+  it("rejects ota_required of non-boolean / non-string type", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: { ...validRequest.payload, ota_required: 1 },
+    });
+    expect(err).toContain("payload.ota_required");
+    expect(err).toContain("boolean or string");
+  });
+
+  it("accepts the full HA non-envelope yaml_authority payload with boolean ota_required", () => {
+    // Updated full-shape probe: ota_required is now a boolean (matches
+    // the live HA wire shape from build_backend.py line 1700).
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: {
+          registry_file: "inverters/growatt/sph/sph10k.json",
+          device_name: "sph10k-home-02",
+          version: "2026.05.19-2116",
+          yaml_hash: validHash,
+          build_contract: "yaml_authority",
+          yaml_content: yamlContentB64,
+          device_key: validRequest.device_key,
+          encrypted_secrets:
+            "edge101_api_key_17e9c4=fixture\nedge101_ota_password_17e9c4=fixture",
+          secret_context_hash: "b".repeat(64),
+          ota_required: true,
+        },
+      }),
+    ).toBeNull();
+  });
 });

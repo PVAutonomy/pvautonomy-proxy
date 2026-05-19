@@ -46,6 +46,19 @@ const VALID_BUILD_CONTRACTS: ReadonlySet<string> = new Set([
 const BUILD_CONTRACT_YAML_AUTHORITY = "yaml_authority";
 const YAML_HASH_RE = /^[a-f0-9]{64}$/i;
 
+// EPIC-006-B7 hotfix #3: HA may send ota_required as either a JSON
+// boolean (Python True/False from build_backend.py) or a string. The
+// proxy normalizes both shapes to a workflow-input string at dispatch
+// time. Only the canonical string forms below are accepted; anything
+// else is a 400. Case-insensitive on the textual forms.
+const OTA_REQUIRED_ALLOWED_STRINGS: ReadonlySet<string> = new Set([
+  "",
+  "0",
+  "1",
+  "true",
+  "false",
+]);
+
 /** Validate POST /build request body. Returns error message or null if valid. */
 export function validateBuildRequest(req: unknown): string | null {
   if (!req || typeof req !== "object") {
@@ -93,6 +106,7 @@ export function validateBuildRequest(req: unknown): string | null {
   }
 
   // Optional-field type checks. Wrong type is a 400, not a silent coerce.
+  // ota_required is handled separately below — HA may send it as a bool.
   const stringFields: ReadonlyArray<string> = [
     "version",
     "encrypted_secrets",
@@ -100,13 +114,32 @@ export function validateBuildRequest(req: unknown): string | null {
     "yaml_content",
     "yaml_hash",
     "compile_secret_envelope",
-    "ota_required",
     "device_key",
     "secret_context_hash",
   ];
   for (const field of stringFields) {
     if (p[field] !== undefined && typeof p[field] !== "string") {
       return `payload.${field} must be a string when present`;
+    }
+  }
+
+  // EPIC-006-B7 hotfix #3: ota_required — accept boolean (HA-native) or
+  // a small canonical string set; reject anything else fail-closed.
+  // Normalization to the workflow's "" / "1" wire shape happens in
+  // dispatch.ts so this guard stays a pure accept-or-reject.
+  if (p.ota_required !== undefined) {
+    const v = p.ota_required;
+    if (typeof v === "boolean") {
+      // ok
+    } else if (typeof v === "string") {
+      if (!OTA_REQUIRED_ALLOWED_STRINGS.has(v.toLowerCase())) {
+        return (
+          'payload.ota_required string must be one of: "", "0", "1", "true", "false" ' +
+          "(case-insensitive)"
+        );
+      }
+    } else {
+      return "payload.ota_required must be a boolean or string when present";
     }
   }
 

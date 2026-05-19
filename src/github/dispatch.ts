@@ -8,6 +8,28 @@ export interface DispatchResult {
 const USER_AGENT = "pvautonomy-proxy/0.1.0";
 
 /**
+ * EPIC-006-B7 hotfix #3: normalize ota_required to the workflow's
+ * string wire shape ("1" for truthy, "" for falsy).
+ *
+ * HA's ProxyRemoteBuildBackend.start_build() sends ota_required as a
+ * JSON boolean (Python True/False); other callers may send a string.
+ * Validation has already restricted the value space to:
+ *   - undefined
+ *   - boolean
+ *   - one of "", "0", "1", "true", "false" (case-insensitive)
+ * so this helper does the deterministic string mapping without any
+ * further error path.
+ */
+export function normalizeOtaRequired(
+  v: string | boolean | undefined,
+): string {
+  if (v === true) return "1";
+  if (v === false || v === undefined) return "";
+  const norm = v.toLowerCase();
+  return norm === "1" || norm === "true" ? "1" : "";
+}
+
+/**
  * Trigger a GitHub Actions workflow_dispatch with return_run_details.
  * Returns the run_id directly (no correlation heuristics needed).
  *
@@ -34,7 +56,8 @@ export async function triggerWorkflowDispatch(
     device_name: payload.device_name,
     version: payload.version ?? "",
     build_id: buildId,
-    ota_required: payload.ota_required ?? "",
+    // EPIC-006-B7 hotfix #3: normalize boolean / string ota_required.
+    ota_required: normalizeOtaRequired(payload.ota_required),
     device_key: deviceKey,
     encrypted_secrets: payload.encrypted_secrets ?? "",
     build_contract: payload.build_contract ?? "",
