@@ -82,4 +82,165 @@ describe("validateBuildRequest", () => {
   it("rejects null body", () => {
     expect(validateBuildRequest(null)).toContain("JSON object");
   });
+
+  // ── EPIC-006-B7: yaml_authority contract + strict payload ──────────────
+
+  const yamlContentB64 = Buffer.from("esphome:\n  name: x\n").toString("base64");
+  const validHash = "a".repeat(64);
+
+  it("accepts a well-formed yaml_authority payload", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: {
+          ...validRequest.payload,
+          build_contract: "yaml_authority",
+          yaml_content: yamlContentB64,
+          yaml_hash: validHash,
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts a legacy payload with explicit empty build_contract", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, build_contract: "" },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects yaml_authority without yaml_content", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        build_contract: "yaml_authority",
+        yaml_hash: validHash,
+      },
+    });
+    expect(err).toContain("yaml_content");
+  });
+
+  it("rejects yaml_authority without yaml_hash", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        build_contract: "yaml_authority",
+        yaml_content: yamlContentB64,
+      },
+    });
+    expect(err).toContain("yaml_hash");
+  });
+
+  it("rejects yaml_authority with empty yaml_content string", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        build_contract: "yaml_authority",
+        yaml_content: "",
+        yaml_hash: validHash,
+      },
+    });
+    expect(err).toContain("yaml_content");
+  });
+
+  it("rejects yaml_hash with wrong length", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        yaml_hash: "a".repeat(63),
+      },
+    });
+    expect(err).toContain("64 hex");
+  });
+
+  it("rejects yaml_hash with non-hex characters", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        yaml_hash: "z".repeat(64),
+      },
+    });
+    expect(err).toContain("64 hex");
+  });
+
+  it("accepts well-formed yaml_hash on the legacy path (as a cache key)", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, yaml_hash: validHash },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects unknown payload field", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        not_a_real_field: "anything",
+      },
+    });
+    expect(err).toContain("not_a_real_field");
+    expect(err).toContain("not a known field");
+  });
+
+  it("rejects an unrecognized build_contract value", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        build_contract: "registry_authority",
+      },
+    });
+    expect(err).toContain("build_contract");
+  });
+
+  it("rejects dual secret path (encrypted_secrets + compile_secret_envelope)", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        encrypted_secrets: "k=v",
+        compile_secret_envelope: '{"hpke":"v1"}',
+      },
+    });
+    expect(err).toContain("mutually exclusive");
+  });
+
+  it("accepts encrypted_secrets alone (legacy secret path)", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, encrypted_secrets: "k=v" },
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts compile_secret_envelope alone (HPKE secret path)", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: {
+          ...validRequest.payload,
+          compile_secret_envelope: '{"hpke":"v1"}',
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects optional string field of wrong type", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: { ...validRequest.payload, version: 1234 },
+    });
+    expect(err).toContain("version");
+    expect(err).toContain("string");
+  });
 });

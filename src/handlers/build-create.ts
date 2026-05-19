@@ -78,7 +78,12 @@ export async function handleBuildCreate(
 
   // 7. Dispatch to GitHub Actions
   try {
-    const dispatch = await triggerWorkflowDispatch(env, buildId, req.payload);
+    const dispatch = await triggerWorkflowDispatch(
+      env,
+      buildId,
+      req.device_key,
+      req.payload,
+    );
     record.status = "dispatched";
     record.github_run_id = dispatch.run_id;
     record.github_run_url = dispatch.run_url;
