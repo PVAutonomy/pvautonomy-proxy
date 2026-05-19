@@ -304,4 +304,62 @@ describe("handleBuildCreate", () => {
     expect(String(data.error)).toContain("payload.device_key");
     expect(String(data.error)).toContain("top-level");
   });
+
+  // ── EPIC-006-B7 hotfix #2: full HA non-envelope yaml_authority payload ─
+
+  it("accepts the full HA non-envelope yaml_authority payload and dispatches", async () => {
+    // This mirrors the exact wire shape pvautonomy-config @70d3a00d emits
+    // on a customer proxy build with build_contract=yaml_authority and no
+    // envelope (build_backend.py lines 1668-1761). Every field HA writes
+    // to payload["payload"] is here. If this passes, the live EDATEC
+    // smoke retry will reach the GHA workflow.
+    const yamlB64 = Buffer.from("esphome:\n  name: smoke\n").toString("base64");
+    const body = JSON.stringify({
+      ...JSON.parse(validBody),
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-home-02",
+        version: "2026.05.19-2116",
+        yaml_hash: "a".repeat(64),
+        build_contract: "yaml_authority",
+        yaml_content: yamlB64,
+        device_key: "17e9c4",
+        encrypted_secrets: "edge101_api_key_17e9c4=k\nedge101_ota_password_17e9c4=p",
+        secret_context_hash: "c".repeat(64),
+        ota_required: "1",
+      },
+    });
+    const env = createMockEnv();
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(201);
+  });
+
+  it("rejects malformed payload.secret_context_hash with 400", async () => {
+    const body = JSON.stringify({
+      ...JSON.parse(validBody),
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-home-02",
+        encrypted_secrets: "k=v",
+        secret_context_hash: "notahash",
+      },
+    });
+    const env = createMockEnv();
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+    });
+
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(400);
+    const data = (await response.json()) as Record<string, unknown>;
+    expect(String(data.error)).toContain("secret_context_hash");
+    expect(String(data.error)).toContain("64 hex");
+  });
 });

@@ -27,6 +27,13 @@ const ALLOWED_PAYLOAD_KEYS: ReadonlySet<string> = new Set([
   "compile_secret_envelope",
   "ota_required",
   "device_key",
+  // EPIC-006-B7 hotfix #2: HA's ProxyRemoteBuildBackend.start_build()
+  // attaches secret_context_hash alongside encrypted_secrets on the
+  // legacy non-envelope secret path (build_backend.py line 1733). It is
+  // sha256(encrypted_secrets) — a hash, not a secret — used by the proxy
+  // BuildRecord cache for secrets-aware cache invalidation. Accept it at
+  // the edge with format validation; NEVER forward to the workflow.
+  "secret_context_hash",
 ]);
 
 // EPIC-006-B7: build_contract whitelist. Empty string means the legacy
@@ -95,6 +102,7 @@ export function validateBuildRequest(req: unknown): string | null {
     "compile_secret_envelope",
     "ota_required",
     "device_key",
+    "secret_context_hash",
   ];
   for (const field of stringFields) {
     if (p[field] !== undefined && typeof p[field] !== "string") {
@@ -143,6 +151,19 @@ export function validateBuildRequest(req: unknown): string | null {
     !YAML_HASH_RE.test(p.yaml_hash)
   ) {
     return "payload.yaml_hash must be 64 hex characters (sha256)";
+  }
+
+  // EPIC-006-B7 hotfix #2: secret_context_hash format check.
+  // Same sha256-hex shape as yaml_hash. HA computes it as
+  // sha256(encrypted_secrets payload) for cache invalidation; the
+  // proxy may persist it in BuildRecord later but never forwards it
+  // to the GHA workflow. Malformed → fail-closed 400.
+  if (
+    typeof p.secret_context_hash === "string" &&
+    p.secret_context_hash.length > 0 &&
+    !YAML_HASH_RE.test(p.secret_context_hash)
+  ) {
+    return "payload.secret_context_hash must be 64 hex characters (sha256)";
   }
 
   // Dual secret path: encrypted_secrets and compile_secret_envelope are

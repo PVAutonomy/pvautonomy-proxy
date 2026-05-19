@@ -68,6 +68,13 @@ export interface BuildPayload {
   // top-level value and forwards only the top-level value to the GHA
   // workflow input. Never sent as a separate workflow input.
   device_key?: string;
+  // EPIC-006-B7 hotfix #2: sha256(encrypted_secrets) cache/audit
+  // metadata that HA attaches on the legacy non-envelope secret path
+  // (custom_components/pvautonomy_ops/build_backend.py line 1733).
+  // Hash, not secret. Validated as 64 lowercase/uppercase hex chars at
+  // the proxy edge and may later be persisted in BuildRecord for cache
+  // invalidation; NOT forwarded to the GHA workflow as an input.
+  secret_context_hash?: string;
 }
 
 /** Persisted in KV under `key:{sha256}`. */
