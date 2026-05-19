@@ -55,7 +55,7 @@ Start a firmware build via GitHub Actions.
 | `version` | no | Firmware version tag. Empty → workflow generates timestamp tag. |
 | `build_contract` | no | `""` (legacy registry-regeneration) or `"yaml_authority"`. Defaults to `""`. |
 | `yaml_content` | conditional | Base64-encoded ESPHome YAML. **Required** when `build_contract = "yaml_authority"`. |
-| `yaml_hash` | conditional | SHA-256 hex (64 chars) of decoded `yaml_content`. **Required** when `build_contract = "yaml_authority"`. Validated at the proxy edge; forwarding to the workflow is gated on the inverter-registry workflow declaring the input (EPIC-006-B7 step 2). |
+| `yaml_hash` | conditional | SHA-256 hex (64 chars) of decoded `yaml_content`. **Required** when `build_contract = "yaml_authority"`. Validated at the proxy edge and forwarded to the workflow, which fails closed before compile if the decoded YAML hash does not match (PVAutonomy/inverter-registry#7). |
 | `encrypted_secrets` | no | Legacy compile secrets. Mutually exclusive with `compile_secret_envelope`. |
 | `compile_secret_envelope` | no | HPKE compile-secret envelope. Mutually exclusive with `encrypted_secrets`. |
 | `ota_required` | no | OTA authentication flag forwarded to the workflow. |

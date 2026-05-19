@@ -21,16 +21,14 @@ export async function triggerWorkflowDispatch(
 ): Promise<DispatchResult> {
   const url = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${env.GITHUB_WORKFLOW_FILE}/dispatches`;
 
-  // EPIC-006-B7: forward every input currently declared by
+  // EPIC-006-B7: forward every input declared by
   // inverter-registry/.github/workflows/build-firmware-on-demand.yml
-  // (10 inputs). Empty strings are sent for absent optional fields —
-  // workflow input defaults are "".
-  //
-  // yaml_hash is deliberately NOT forwarded yet: the workflow at HEAD
-  // (475c787) does not declare a yaml_hash input, so passing it would
-  // cause GitHub to reject the dispatch with HTTP 422. Forwarding will
-  // be enabled in a follow-up commit once inverter-registry adds the
-  // input and the hash-binding compare step (handover step 2).
+  // (11 inputs after PVAutonomy/inverter-registry#7 added yaml_hash).
+  // Empty strings are sent for absent optional fields — workflow input
+  // defaults are "". When the workflow sees a non-empty yaml_hash it
+  // verifies it against the SHA-256 of the decoded yaml_content and
+  // fails closed on mismatch, giving end-to-end binding between the
+  // YAML bytes HA hashed and the YAML bytes the runner compiles.
   const inputs: Record<string, string> = {
     registry_file: payload.registry_file,
     device_name: payload.device_name,
@@ -41,6 +39,7 @@ export async function triggerWorkflowDispatch(
     encrypted_secrets: payload.encrypted_secrets ?? "",
     build_contract: payload.build_contract ?? "",
     yaml_content: payload.yaml_content ?? "",
+    yaml_hash: payload.yaml_hash ?? "",
     compile_secret_envelope: payload.compile_secret_envelope ?? "",
   };
 
