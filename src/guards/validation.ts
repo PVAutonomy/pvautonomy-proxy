@@ -7,6 +7,15 @@ const SUPPORTED_PROFILES = ["production", "factory"];
 
 // EPIC-006-B7: explicit whitelist of payload keys. Unknown keys are rejected
 // so future fields cannot be silently dropped by an older proxy build.
+//
+// EPIC-006-B7 hotfix: HA's ProxyRemoteBuildBackend.start_build() emits
+// payload.device_key alongside the top-level req.device_key for legacy
+// shape compatibility (see custom_components/pvautonomy_ops/
+// build_backend.py "EPIC-011: Forward device_key (MAC suffix) for GHA
+// context"). The proxy never forwards payload.device_key — workflow's
+// device_key input is sourced from top-level req.device_key — but we
+// accept the field so a strict-validation 400 doesn't reject a
+// legitimate HA build. A cross-check enforces equality below.
 const ALLOWED_PAYLOAD_KEYS: ReadonlySet<string> = new Set([
   "registry_file",
   "device_name",
@@ -17,6 +26,7 @@ const ALLOWED_PAYLOAD_KEYS: ReadonlySet<string> = new Set([
   "yaml_hash",
   "compile_secret_envelope",
   "ota_required",
+  "device_key",
 ]);
 
 // EPIC-006-B7: build_contract whitelist. Empty string means the legacy
@@ -84,10 +94,25 @@ export function validateBuildRequest(req: unknown): string | null {
     "yaml_hash",
     "compile_secret_envelope",
     "ota_required",
+    "device_key",
   ];
   for (const field of stringFields) {
     if (p[field] !== undefined && typeof p[field] !== "string") {
       return `payload.${field} must be a string when present`;
+    }
+  }
+
+  // EPIC-006-B7 hotfix: payload.device_key, when present, must match the
+  // 6-hex DEVICE_KEY_RE and equal the top-level req.device_key. The proxy
+  // does not forward this field — it is accepted for legacy/HA-compat
+  // shape only. A mismatch is a fail-closed 400; never silently override.
+  if (p.device_key !== undefined) {
+    const payloadDeviceKey = p.device_key as string;
+    if (!DEVICE_KEY_RE.test(payloadDeviceKey)) {
+      return "payload.device_key must be 6 hex characters (last6 MAC)";
+    }
+    if (payloadDeviceKey !== r.device_key) {
+      return "payload.device_key must equal top-level device_key when present";
     }
   }
 

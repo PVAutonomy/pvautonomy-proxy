@@ -208,4 +208,33 @@ describe("triggerWorkflowDispatch", () => {
       ),
     ).rejects.toThrow(/HTTP 422/);
   });
+
+  it("uses the deviceKey parameter (top-level) for the workflow input, ignoring payload.device_key", async () => {
+    // EPIC-006-B7 hotfix: HA's ProxyRemoteBuildBackend echoes the MAC
+    // suffix into payload.device_key in addition to top-level
+    // BuildRequest.device_key. The proxy validates equality at the edge
+    // (validation.ts) and dispatch only uses the top-level value as the
+    // workflow input source — payload.device_key is NOT forwarded as a
+    // separate input. There is only one device_key input on the workflow.
+    const fetchMock = mockFetchOnce();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await triggerWorkflowDispatch(
+      createEnv(),
+      "build-uuid-7",
+      "17e9c4", // <-- top-level deviceKey arg (from BuildRequest.device_key)
+      legacyPayload({ device_key: "17e9c4" }), // <-- HA's payload echo
+    );
+
+    const inputs = (mockFetchOnce as unknown as {
+      lastInputs: Record<string, string>;
+    }).lastInputs;
+
+    // Exactly one device_key input, sourced from the top-level arg.
+    const deviceKeyEntries = Object.keys(inputs).filter(
+      (k) => k === "device_key",
+    );
+    expect(deviceKeyEntries).toHaveLength(1);
+    expect(inputs.device_key).toBe("17e9c4");
+  });
 });

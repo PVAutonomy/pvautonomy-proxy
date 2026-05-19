@@ -61,6 +61,13 @@ export interface BuildPayload {
   compile_secret_envelope?: string;
   // EPIC-006-B7: OTA-authentication flag forwarded to the workflow.
   ota_required?: string;
+  // EPIC-006-B7 hotfix: legacy/HA-compat shape. HA's
+  // ProxyRemoteBuildBackend.start_build() echoes the 6-hex MAC suffix
+  // into payload.device_key in addition to the top-level
+  // BuildRequest.device_key. The proxy validates equality with the
+  // top-level value and forwards only the top-level value to the GHA
+  // workflow input. Never sent as a separate workflow input.
+  device_key?: string;
 }
 
 /** Persisted in KV under `key:{sha256}`. */

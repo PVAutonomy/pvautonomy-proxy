@@ -238,4 +238,70 @@ describe("handleBuildCreate", () => {
     const response = await handleBuildCreate(request, env, customer);
     expect(response.status).toBe(400);
   });
+
+  // ── EPIC-006-B7 hotfix: payload.device_key passthrough ────────────────
+
+  it("accepts HA-realistic payload with payload.device_key echoing top-level device_key", async () => {
+    // Matches the wire shape HA's ProxyRemoteBuildBackend.start_build()
+    // sends on every customer proxy build (see custom_components/
+    // pvautonomy_ops/build_backend.py "EPIC-011: Forward device_key
+    // (MAC suffix) for GHA context").
+    const body = JSON.stringify({
+      ...JSON.parse(validBody),
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-home-02",
+        version: "2026.05.19-2116",
+        device_key: "17e9c4", // <-- mirrors top-level req.device_key
+        ota_required: "1",
+        encrypted_secrets: "k1=v1\nk2=v2",
+      },
+    });
+    const env = createMockEnv();
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(201);
+
+    // Confirm dispatch sources device_key from the TOP-LEVEL req.device_key
+    // arg, not from payload.device_key. The forwarded payload object still
+    // contains payload.device_key (we only accept/validate; we don't strip),
+    // but the workflow input mapping in dispatch.ts uses the deviceKey
+    // parameter.
+    const { triggerWorkflowDispatch } = await import(
+      "../../src/github/dispatch.js"
+    );
+    expect(triggerWorkflowDispatch).toHaveBeenCalledTimes(1);
+    const [_env, _buildId, deviceKey, forwardedPayload] = (
+      triggerWorkflowDispatch as ReturnType<typeof vi.fn>
+    ).mock.calls[0];
+    expect(deviceKey).toBe("17e9c4");
+    expect(forwardedPayload.device_key).toBe("17e9c4");
+  });
+
+  it("rejects payload.device_key mismatch with 400", async () => {
+    const body = JSON.stringify({
+      ...JSON.parse(validBody),
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-home-02",
+        device_key: "deadbe", // <-- mismatches top-level 17e9c4
+      },
+    });
+    const env = createMockEnv();
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+    });
+
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(400);
+    const data = (await response.json()) as Record<string, unknown>;
+    expect(String(data.error)).toContain("payload.device_key");
+    expect(String(data.error)).toContain("top-level");
+  });
 });

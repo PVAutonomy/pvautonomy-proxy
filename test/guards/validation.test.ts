@@ -243,4 +243,54 @@ describe("validateBuildRequest", () => {
     expect(err).toContain("version");
     expect(err).toContain("string");
   });
+
+  // ── EPIC-006-B7 hotfix: payload.device_key legacy/HA-compat ────────────
+
+  it("accepts payload.device_key when it matches the top-level device_key", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: {
+          ...validRequest.payload,
+          device_key: validRequest.device_key,
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects payload.device_key when it does not match the top-level device_key", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        device_key: "deadbe",
+      },
+    });
+    expect(err).toContain("payload.device_key");
+    expect(err).toContain("top-level");
+  });
+
+  it("rejects payload.device_key with malformed value (not 6-hex)", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        device_key: "zzz",
+      },
+    });
+    expect(err).toContain("payload.device_key");
+    expect(err).toContain("6 hex");
+  });
+
+  it("rejects payload.device_key of wrong type", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        device_key: 12345,
+      },
+    });
+    expect(err).toContain("payload.device_key");
+    expect(err).toContain("string");
+  });
 });
