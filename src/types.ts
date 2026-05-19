@@ -48,6 +48,19 @@ export interface BuildPayload {
   device_name: string;
   version?: string;
   encrypted_secrets?: string;
+  // EPIC-006-B7: yaml_authority build contract. When build_contract is
+  // "yaml_authority", the GHA runner compiles the decoded yaml_content
+  // verbatim. The proxy requires both yaml_content and yaml_hash to be
+  // present and rejects the request at the edge otherwise.
+  build_contract?: string;
+  yaml_content?: string;
+  yaml_hash?: string;
+  // EPIC-006-B7: HPKE compile-secret envelope. Mutually exclusive with
+  // encrypted_secrets — both set is rejected at the proxy edge and again
+  // at the workflow.
+  compile_secret_envelope?: string;
+  // EPIC-006-B7: OTA-authentication flag forwarded to the workflow.
+  ota_required?: string;
 }
 
 /** Persisted in KV under `key:{sha256}`. */

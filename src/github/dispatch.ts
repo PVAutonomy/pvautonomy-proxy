@@ -16,16 +16,32 @@ const USER_AGENT = "pvautonomy-proxy/0.1.0";
 export async function triggerWorkflowDispatch(
   env: Env,
   buildId: string,
+  deviceKey: string,
   payload: BuildPayload,
 ): Promise<DispatchResult> {
   const url = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${env.GITHUB_WORKFLOW_FILE}/dispatches`;
 
-  // Only send inputs the workflow currently accepts.
-  // build_id + encrypted_secrets will be added in C1 (workflow contract update).
+  // EPIC-006-B7: forward every input currently declared by
+  // inverter-registry/.github/workflows/build-firmware-on-demand.yml
+  // (10 inputs). Empty strings are sent for absent optional fields —
+  // workflow input defaults are "".
+  //
+  // yaml_hash is deliberately NOT forwarded yet: the workflow at HEAD
+  // (475c787) does not declare a yaml_hash input, so passing it would
+  // cause GitHub to reject the dispatch with HTTP 422. Forwarding will
+  // be enabled in a follow-up commit once inverter-registry adds the
+  // input and the hash-binding compare step (handover step 2).
   const inputs: Record<string, string> = {
     registry_file: payload.registry_file,
     device_name: payload.device_name,
-    version: payload.version || "",
+    version: payload.version ?? "",
+    build_id: buildId,
+    ota_required: payload.ota_required ?? "",
+    device_key: deviceKey,
+    encrypted_secrets: payload.encrypted_secrets ?? "",
+    build_contract: payload.build_contract ?? "",
+    yaml_content: payload.yaml_content ?? "",
+    compile_secret_envelope: payload.compile_secret_envelope ?? "",
   };
 
   const body = {

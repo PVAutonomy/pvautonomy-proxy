@@ -34,10 +34,33 @@ Start a firmware build via GitHub Actions.
     "registry_file": "inverters/growatt/sph/sph10k.json",
     "device_name": "sph10k-haus-03",
     "version": "2026.02.24",
-    "encrypted_secrets": "<base64>"
+
+    "build_contract": "yaml_authority",
+    "yaml_content": "<base64 of generated ESPHome YAML>",
+    "yaml_hash": "<sha256 hex of decoded yaml_content, 64 chars>",
+
+    "encrypted_secrets": "<base64 of legacy compile secrets>",
+    "compile_secret_envelope": "<JSON HPKE envelope; mutually exclusive with encrypted_secrets>",
+
+    "ota_required": "1"
   }
 }
 ```
+
+**Payload fields:**
+| Field | Required | Notes |
+|-------|----------|-------|
+| `registry_file` | yes | Path under `inverters/` in the registry repo. |
+| `device_name` | yes | Lowercase alphanumeric, `[a-z0-9][a-z0-9_-]{1,50}`. |
+| `version` | no | Firmware version tag. Empty → workflow generates timestamp tag. |
+| `build_contract` | no | `""` (legacy registry-regeneration) or `"yaml_authority"`. Defaults to `""`. |
+| `yaml_content` | conditional | Base64-encoded ESPHome YAML. **Required** when `build_contract = "yaml_authority"`. |
+| `yaml_hash` | conditional | SHA-256 hex (64 chars) of decoded `yaml_content`. **Required** when `build_contract = "yaml_authority"`. Validated at the proxy edge; forwarding to the workflow is gated on the inverter-registry workflow declaring the input (EPIC-006-B7 step 2). |
+| `encrypted_secrets` | no | Legacy compile secrets. Mutually exclusive with `compile_secret_envelope`. |
+| `compile_secret_envelope` | no | HPKE compile-secret envelope. Mutually exclusive with `encrypted_secrets`. |
+| `ota_required` | no | OTA authentication flag forwarded to the workflow. |
+
+Unknown payload fields are **rejected with HTTP 400** — the proxy will not silently drop fields. This is the EPIC-006-B7 strict-validation contract.
 
 **Response (201):**
 ```json
@@ -51,7 +74,7 @@ Start a firmware build via GitHub Actions.
 **Errors:**
 | Status | Meaning |
 |--------|---------|
-| 400 | Invalid request body |
+| 400 | Invalid request body, unknown payload field, malformed `yaml_hash`, missing `yaml_content`/`yaml_hash` when `build_contract = yaml_authority`, both `encrypted_secrets` and `compile_secret_envelope` set, or invalid `build_contract` value |
 | 403 | customer_id mismatch or invalid key |
 | 409 | Concurrent build already in progress |
 | 413 | Payload too large |
@@ -115,8 +138,26 @@ Public health check (no auth required).
 |-------|-------|----------|
 | Rate limit | 10 builds/day per customer (configurable) | 429 |
 | Concurrency | 1 active build per customer | 409 |
-| Payload size | 64 KB | 413 |
+| Payload size | 64 KB (`MAX_PAYLOAD_BYTES`) | 413 |
 | Build timeout | 15 minutes | status: "timeout" |
+
+### `yaml_authority` transport sizing
+
+GitHub `workflow_dispatch` allows up to **25 inputs** with a **65,535-char total
+payload** across all inputs (per GitHub Actions docs and the 2025-12-04
+changelog). The workflow currently declares 10 inputs.
+
+Measured base64 `yaml_content` for current registries (SPH10K worst case at
+the `unsafe` tier with all 51 sensors enabled, MIC600 max):
+
+| Inverter | Raw YAML | Base64 `yaml_content` | % of 65,535 total |
+|----------|---------:|----------------------:|------------------:|
+| SPH10K (unsafe) | 26,515 B | 35,356 chars | 53.9% |
+| MIC600 | 6,282 B | 8,376 chars | 12.8% |
+
+Headroom is comfortable today. A future registry with significantly more
+sensors (or a second large inverter family) should re-measure before relying
+on the `workflow_dispatch.inputs` transport.
 
 ---
 

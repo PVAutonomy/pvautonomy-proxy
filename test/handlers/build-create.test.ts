@@ -139,4 +139,103 @@ describe("handleBuildCreate", () => {
     const response = await handleBuildCreate(request, env, customer);
     expect(response.status).toBe(409);
   });
+
+  // ── EPIC-006-B7 ────────────────────────────────────────────────────────
+
+  it("accepts and dispatches a yaml_authority payload", async () => {
+    const yamlB64 = Buffer.from("esphome:\n  name: x\n").toString("base64");
+    const body = JSON.stringify({
+      ...JSON.parse(validBody),
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-haus-03",
+        version: "2026.05.19",
+        build_contract: "yaml_authority",
+        yaml_content: yamlB64,
+        yaml_hash: "a".repeat(64),
+      },
+    });
+    const env = createMockEnv();
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(201);
+
+    const { triggerWorkflowDispatch } = await import(
+      "../../src/github/dispatch.js"
+    );
+    expect(triggerWorkflowDispatch).toHaveBeenCalledTimes(1);
+    const [_env, buildId, deviceKey, forwarded] = (
+      triggerWorkflowDispatch as ReturnType<typeof vi.fn>
+    ).mock.calls[0];
+    expect(typeof buildId).toBe("string");
+    expect(deviceKey).toBe("17e9c4");
+    expect(forwarded.build_contract).toBe("yaml_authority");
+    expect(forwarded.yaml_content).toBe(yamlB64);
+    expect(forwarded.yaml_hash).toBe("a".repeat(64));
+  });
+
+  it("rejects yaml_authority payload missing yaml_content with 400", async () => {
+    const body = JSON.stringify({
+      ...JSON.parse(validBody),
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-haus-03",
+        build_contract: "yaml_authority",
+        yaml_hash: "a".repeat(64),
+      },
+    });
+    const env = createMockEnv();
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+    });
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(400);
+    const data = (await response.json()) as Record<string, unknown>;
+    expect(String(data.error)).toContain("yaml_content");
+  });
+
+  it("rejects unknown payload field with 400 instead of silently dropping", async () => {
+    const body = JSON.stringify({
+      ...JSON.parse(validBody),
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-haus-03",
+        smuggled_field: "should-not-pass",
+      },
+    });
+    const env = createMockEnv();
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+    });
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(400);
+    const data = (await response.json()) as Record<string, unknown>;
+    expect(String(data.error)).toContain("smuggled_field");
+  });
+
+  it("rejects dual secret path with 400", async () => {
+    const body = JSON.stringify({
+      ...JSON.parse(validBody),
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-haus-03",
+        encrypted_secrets: "k=v",
+        compile_secret_envelope: '{"hpke":"v1"}',
+      },
+    });
+    const env = createMockEnv();
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+    });
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(400);
+  });
 });
