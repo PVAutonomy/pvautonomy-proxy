@@ -340,6 +340,52 @@ describe("handleBuildCreate", () => {
     expect(response.status).toBe(201);
   });
 
+  it("accepts HA wire shape with boolean ota_required=true and dispatches ota_required='1'", async () => {
+    // EPIC-006-B7 hotfix #3: HA emits ota_required as a Python bool
+    // (JSON true on the wire). Earlier versions of this test used
+    // `ota_required: "1"` which masked the real wire shape. This test
+    // pins the actual live blocker: boolean true accepted + normalized
+    // to "1" at dispatch.
+    const yamlB64 = Buffer.from("esphome:\n  name: smoke\n").toString("base64");
+    const body = JSON.stringify({
+      ...JSON.parse(validBody),
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-home-02",
+        version: "2026.05.19-2116",
+        yaml_hash: "a".repeat(64),
+        build_contract: "yaml_authority",
+        yaml_content: yamlB64,
+        device_key: "17e9c4",
+        encrypted_secrets:
+          "edge101_api_key_17e9c4=k\nedge101_ota_password_17e9c4=p",
+        secret_context_hash: "c".repeat(64),
+        ota_required: true, // <-- boolean, as HA actually sends
+      },
+    });
+    const env = createMockEnv();
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(201);
+
+    const { triggerWorkflowDispatch } = await import(
+      "../../src/github/dispatch.js"
+    );
+    expect(triggerWorkflowDispatch).toHaveBeenCalledTimes(1);
+    const [, , , forwardedPayload] = (
+      triggerWorkflowDispatch as ReturnType<typeof vi.fn>
+    ).mock.calls[0];
+    // Handler passes the raw payload through; dispatch.ts is responsible
+    // for normalization (covered by dispatch.test.ts). Confirm the raw
+    // boolean made it to the dispatch boundary.
+    expect(forwardedPayload.ota_required).toBe(true);
+  });
+
   it("rejects malformed payload.secret_context_hash with 400", async () => {
     const body = JSON.stringify({
       ...JSON.parse(validBody),

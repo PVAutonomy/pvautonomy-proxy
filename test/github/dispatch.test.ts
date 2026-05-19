@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { triggerWorkflowDispatch } from "../../src/github/dispatch.js";
+import {
+  triggerWorkflowDispatch,
+  normalizeOtaRequired,
+} from "../../src/github/dispatch.js";
 import type { BuildPayload, Env } from "../../src/types.js";
 
 function createEnv(): Env {
@@ -281,5 +284,80 @@ describe("triggerWorkflowDispatch", () => {
     );
     expect(deviceKeyEntries).toHaveLength(1);
     expect(inputs.device_key).toBe("17e9c4");
+  });
+
+  // ── EPIC-006-B7 hotfix #3: ota_required normalization at dispatch ─────
+
+  it.each([
+    [true, "1"],
+    [false, ""],
+    [undefined, ""],
+    ["1", "1"],
+    ["0", ""],
+    ["true", "1"],
+    ["false", ""],
+    ["TRUE", "1"],
+    ["False", ""],
+    ["", ""],
+  ] as Array<[string | boolean | undefined, string]>)(
+    "normalizeOtaRequired(%j) -> %j",
+    (input, expected) => {
+      expect(normalizeOtaRequired(input)).toBe(expected);
+    },
+  );
+
+  it("forwards HA-realistic boolean ota_required=true as workflow input '1'", async () => {
+    // Mirrors HA's actual wire shape: build_backend.py emits
+    // payload["payload"]["ota_required"] = True (Python bool → JSON true).
+    const fetchMock = mockFetchOnce();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await triggerWorkflowDispatch(
+      createEnv(),
+      "build-uuid-ota-true",
+      "17e9c4",
+      legacyPayload({ ota_required: true }),
+    );
+
+    const inputs = (mockFetchOnce as unknown as {
+      lastInputs: Record<string, string>;
+    }).lastInputs;
+
+    expect(inputs.ota_required).toBe("1");
+    // Still exactly the 11 declared workflow inputs (no new keys, no
+    // missing keys).
+    expect(Object.keys(inputs).sort()).toEqual(
+      [
+        "build_contract",
+        "build_id",
+        "compile_secret_envelope",
+        "device_key",
+        "device_name",
+        "encrypted_secrets",
+        "ota_required",
+        "registry_file",
+        "version",
+        "yaml_content",
+        "yaml_hash",
+      ].sort(),
+    );
+  });
+
+  it("forwards boolean ota_required=false as workflow input ''", async () => {
+    const fetchMock = mockFetchOnce();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await triggerWorkflowDispatch(
+      createEnv(),
+      "build-uuid-ota-false",
+      "17e9c4",
+      legacyPayload({ ota_required: false }),
+    );
+
+    const inputs = (mockFetchOnce as unknown as {
+      lastInputs: Record<string, string>;
+    }).lastInputs;
+
+    expect(inputs.ota_required).toBe("");
   });
 });

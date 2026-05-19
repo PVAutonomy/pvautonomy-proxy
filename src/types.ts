@@ -60,7 +60,14 @@ export interface BuildPayload {
   // at the workflow.
   compile_secret_envelope?: string;
   // EPIC-006-B7: OTA-authentication flag forwarded to the workflow.
-  ota_required?: string;
+  //
+  // EPIC-006-B7 hotfix #3: HA's ProxyRemoteBuildBackend.start_build()
+  // emits ota_required as a Python bool (True/False) — wire type
+  // `boolean`, not `string`. The GHA workflow_dispatch input is typed
+  // `string`. The proxy accepts both shapes here, validates the allowed
+  // value space, and normalizes deterministically to "1" (truthy) or ""
+  // (falsy) at dispatch time. Never silently coerce a malformed string.
+  ota_required?: string | boolean;
   // EPIC-006-B7 hotfix: legacy/HA-compat shape. HA's
   // ProxyRemoteBuildBackend.start_build() echoes the 6-hex MAC suffix
   // into payload.device_key in addition to the top-level
