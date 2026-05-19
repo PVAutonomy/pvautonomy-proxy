@@ -209,6 +209,51 @@ describe("triggerWorkflowDispatch", () => {
     ).rejects.toThrow(/HTTP 422/);
   });
 
+  it("does NOT forward payload.secret_context_hash as a workflow input", async () => {
+    // EPIC-006-B7 hotfix #2: secret_context_hash is HA-side cache/audit
+    // metadata (sha256 of encrypted_secrets). It's accepted at the proxy
+    // edge but is NOT a workflow input — the build-firmware-on-demand.yml
+    // workflow does not declare it and forwarding it would 422 every
+    // dispatch.
+    const fetchMock = mockFetchOnce();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await triggerWorkflowDispatch(
+      createEnv(),
+      "build-uuid-secret-ctx",
+      "17e9c4",
+      legacyPayload({
+        encrypted_secrets: "k=v",
+        // Note: BuildPayload type allows secret_context_hash since the
+        // hotfix; the cast keeps TS happy if the field hasn't been
+        // exposed in the test's BuildPayload narrowing.
+        ...({ secret_context_hash: "c".repeat(64) } as Partial<BuildPayload>),
+      }),
+    );
+
+    const inputs = (mockFetchOnce as unknown as {
+      lastInputs: Record<string, string>;
+    }).lastInputs;
+
+    expect(inputs).not.toHaveProperty("secret_context_hash");
+    // And still exactly the 11 declared workflow inputs.
+    expect(Object.keys(inputs).sort()).toEqual(
+      [
+        "build_contract",
+        "build_id",
+        "compile_secret_envelope",
+        "device_key",
+        "device_name",
+        "encrypted_secrets",
+        "ota_required",
+        "registry_file",
+        "version",
+        "yaml_content",
+        "yaml_hash",
+      ].sort(),
+    );
+  });
+
   it("uses the deviceKey parameter (top-level) for the workflow input, ignoring payload.device_key", async () => {
     // EPIC-006-B7 hotfix: HA's ProxyRemoteBuildBackend echoes the MAC
     // suffix into payload.device_key in addition to top-level

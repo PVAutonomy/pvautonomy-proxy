@@ -293,4 +293,80 @@ describe("validateBuildRequest", () => {
     expect(err).toContain("payload.device_key");
     expect(err).toContain("string");
   });
+
+  // ── EPIC-006-B7 hotfix #2: payload.secret_context_hash ─────────────────
+
+  const SECRET_CTX_HASH = "b".repeat(64);
+
+  it("accepts a well-formed secret_context_hash on the legacy secret path", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: {
+          ...validRequest.payload,
+          encrypted_secrets: "k=v",
+          secret_context_hash: SECRET_CTX_HASH,
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts the full HA non-envelope yaml_authority payload shape", () => {
+    // Mirrors exactly what custom_components/pvautonomy_ops/build_backend.py
+    // emits on a customer proxy build with build_contract=yaml_authority
+    // and no envelope: every payload-level field HA writes is here.
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: {
+          registry_file: "inverters/growatt/sph/sph10k.json",
+          device_name: "sph10k-home-02",
+          version: "2026.05.19-2116",
+          yaml_hash: validHash,
+          build_contract: "yaml_authority",
+          yaml_content: yamlContentB64,
+          device_key: validRequest.device_key,
+          encrypted_secrets: "edge101_api_key_17e9c4=fixture\nedge101_ota_password_17e9c4=fixture",
+          secret_context_hash: SECRET_CTX_HASH,
+          ota_required: "1",
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects payload.secret_context_hash with wrong format (not 64 hex)", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        secret_context_hash: "deadbeef",
+      },
+    });
+    expect(err).toContain("payload.secret_context_hash");
+    expect(err).toContain("64 hex");
+  });
+
+  it("rejects payload.secret_context_hash with non-hex characters", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        secret_context_hash: "z".repeat(64),
+      },
+    });
+    expect(err).toContain("payload.secret_context_hash");
+    expect(err).toContain("64 hex");
+  });
+
+  it("rejects payload.secret_context_hash of wrong type", () => {
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        secret_context_hash: 12345,
+      },
+    });
+    expect(err).toContain("payload.secret_context_hash");
+    expect(err).toContain("string");
+  });
 });
