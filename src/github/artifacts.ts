@@ -148,6 +148,104 @@ async function resolveFromReleaseAssets(
   return null;
 }
 
+/** Canonical artifact names exposed via GET /build/:id/artifact/:name. */
+export type ArtifactName = "firmware.ota.bin" | "manifest.json";
+
+/** Match a release asset by canonical artifact name. */
+function matchReleaseAsset(
+  assets: ReleaseAsset[],
+  name: ArtifactName,
+): ReleaseAsset | undefined {
+  if (name === "firmware.ota.bin") {
+    return assets.find((a) => a.name.endsWith(".ota.bin"));
+  }
+  // manifest.json
+  return assets.find(
+    (a) => a.name === "manifest.json" || a.name.endsWith("-manifest.json"),
+  );
+}
+
+/**
+ * Locate the GitHub API asset URL for a canonical artifact name.
+ *
+ * The browser_download_url stored in ArtifactInfo is unusable for private
+ * repos (anonymous access → 404), so we re-resolve the release and return the
+ * asset's API `url`, which streams the bytes when fetched with the PAT and
+ * `Accept: application/octet-stream`.
+ */
+async function findReleaseAssetApiUrl(
+  env: Env,
+  record: BuildRecord,
+  name: ArtifactName,
+): Promise<ReleaseAsset | null> {
+  const url = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/releases?per_page=10`;
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": USER_AGENT,
+    },
+  });
+
+  if (!response.ok) return null;
+
+  const releases = (await response.json()) as Release[];
+  const deviceName = record.payload?.device_name ?? "";
+
+  for (const release of releases) {
+    if (deviceName && !release.tag_name.startsWith(deviceName)) continue;
+    const asset = matchReleaseAsset(release.assets, name);
+    if (asset) return asset;
+  }
+
+  return null;
+}
+
+/**
+ * Stream a private GitHub Release asset through the proxy using GITHUB_PAT.
+ *
+ * Returns a streaming Response (200) on success, or null when the asset cannot
+ * be located or the upstream fetch fails. Never returns browser_download_url
+ * content anonymously — the bytes are always pulled with the PAT.
+ */
+export async function streamReleaseAsset(
+  env: Env,
+  record: BuildRecord,
+  name: ArtifactName,
+): Promise<Response | null> {
+  const asset = await findReleaseAssetApiUrl(env, record, name);
+  if (!asset) return null;
+
+  const upstream = await fetch(asset.url, {
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Accept: "application/octet-stream",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": USER_AGENT,
+    },
+  });
+
+  if (!upstream.ok || !upstream.body) return null;
+
+  const headers = new Headers();
+  headers.set(
+    "Content-Type",
+    name === "manifest.json" ? "application/json" : "application/octet-stream",
+  );
+  // Prefer the upstream length; fall back to the asset metadata size.
+  const upstreamLen = upstream.headers.get("Content-Length");
+  if (upstreamLen) {
+    headers.set("Content-Length", upstreamLen);
+  } else if (asset.size > 0) {
+    headers.set("Content-Length", String(asset.size));
+  }
+  headers.set("Content-Disposition", `attachment; filename="${name}"`);
+
+  return new Response(upstream.body, { status: 200, headers });
+}
+
 /** Fetch a release asset as JSON via the GitHub API (handles private repos). */
 async function fetchAssetJson<T>(env: Env, apiUrl: string): Promise<T | null> {
   const response = await fetch(apiUrl, {

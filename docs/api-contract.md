@@ -117,6 +117,31 @@ Poll build status. Non-terminal builds trigger a live GitHub API poll.
 
 ---
 
+### `GET /build/{build_id}/artifact/{name}`
+
+Stream a build artifact through the proxy. HA calls this after a successful
+build to fetch the firmware for OTA install. The bytes are pulled from the
+**private** GitHub Release asset using `GITHUB_PAT` (via the asset API URL with
+`Accept: application/octet-stream`) — never from `browser_download_url`
+anonymously. Auth is identical to `GET /build/{build_id}`.
+
+**Allowed `{name}` values:** `firmware.ota.bin` | `manifest.json`
+
+**Response (200):** the raw artifact bytes.
+- `Content-Type`: `application/octet-stream` (firmware) or `application/json`
+  (manifest).
+- `Content-Length`: set from the upstream asset when available.
+- `Content-Disposition`: `attachment; filename="{name}"`.
+
+**Errors:**
+| Status | Meaning |
+|--------|---------|
+| 401/403 | Missing/invalid API key |
+| 404 | Unknown `build_id`, no artifact on the record, disallowed `{name}`, or the release asset could not be located |
+| 409 | Build not yet `status: success` |
+
+---
+
 ### `GET /health`
 
 Public health check (no auth required).
@@ -169,5 +194,5 @@ The HA integration's `ProxyRemoteBuildBackend` maps to this API:
 |--------------------|-|
 | `start_build()` | `POST /build` |
 | `get_status()` | `GET /build/{build_id}` |
-| `fetch_artifact()` | Download from `artifact.firmware_url` directly |
+| `fetch_artifact()` | `GET /build/{build_id}/artifact/{name}` (proxy-streamed via PAT) |
 | `health_check()` | `GET /health` |

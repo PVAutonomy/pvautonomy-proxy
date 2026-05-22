@@ -3,6 +3,7 @@ import { jsonError } from "./errors.js";
 import { authenticateRequest } from "./auth/api-key.js";
 import { handleBuildCreate } from "./handlers/build-create.js";
 import { handleBuildStatus } from "./handlers/build-status.js";
+import { handleBuildArtifact } from "./handlers/build-artifact.js";
 import { handleHealth } from "./handlers/health.js";
 
 /** Simple path-based router. */
@@ -39,6 +40,15 @@ export async function route(
   // POST /build
   if (method === "POST" && path === "/build") {
     response = await handleBuildCreate(request, env, auth.customer);
+    return addCors(response);
+  }
+
+  // GET /build/:id/artifact/:name
+  const artifactMatch = path.match(
+    /^\/build\/([0-9a-f-]{36})\/artifact\/([A-Za-z0-9._-]+)$/,
+  );
+  if (method === "GET" && artifactMatch) {
+    response = await handleBuildArtifact(env, artifactMatch[1], artifactMatch[2]);
     return addCors(response);
   }
 
