@@ -198,6 +198,55 @@ describe("triggerWorkflowDispatch", () => {
     expect(inputs.encrypted_secrets).toBe("");
   });
 
+  it("forwards compile_secret_envelope as exactly one string input (no object, no extra input)", async () => {
+    // Wire-type proof for the dormant envelope path: GitHub Actions
+    // workflow_dispatch inputs can only be strings. The proxy must forward
+    // the envelope as a single string-valued input — never an object, and
+    // without adding any input beyond the 11 the workflow declares.
+    const fetchMock = mockFetchOnce();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const envelopeJson =
+      '{"alg":"HPKE","ciphertext":"abc","enc":"def","key_id":"bb-2026-04","v":1}';
+
+    await triggerWorkflowDispatch(
+      createEnv(),
+      "build-uuid-env-wire",
+      "17e9c4",
+      legacyPayload({ compile_secret_envelope: envelopeJson }),
+    );
+
+    const inputs = (mockFetchOnce as unknown as {
+      lastInputs: Record<string, string>;
+    }).lastInputs;
+
+    // Exactly one compile_secret_envelope input, value is a string.
+    const envEntries = Object.keys(inputs).filter(
+      (k) => k === "compile_secret_envelope",
+    );
+    expect(envEntries).toHaveLength(1);
+    expect(typeof inputs.compile_secret_envelope).toBe("string");
+    expect(inputs.compile_secret_envelope).toBe(envelopeJson);
+    expect(inputs.encrypted_secrets).toBe("");
+
+    // No object form leaked through, and exactly the 11 declared inputs.
+    expect(Object.keys(inputs).sort()).toEqual(
+      [
+        "build_contract",
+        "build_id",
+        "compile_secret_envelope",
+        "device_key",
+        "device_name",
+        "encrypted_secrets",
+        "ota_required",
+        "registry_file",
+        "version",
+        "yaml_content",
+        "yaml_hash",
+      ].sort(),
+    );
+  });
+
   it("throws on GitHub HTTP error", async () => {
     const fetchMock = mockFetchOnce(422, { message: "Unexpected inputs" });
     globalThis.fetch = fetchMock as unknown as typeof fetch;

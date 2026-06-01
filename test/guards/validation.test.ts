@@ -235,6 +235,41 @@ describe("validateBuildRequest", () => {
     ).toBeNull();
   });
 
+  it("accepts compile_secret_envelope as a deterministic JSON string (HA wire shape)", () => {
+    // HA serializes the sealed envelope deterministically (sorted keys,
+    // compact separators) into a single JSON *string*. The proxy must
+    // accept that string verbatim.
+    const envelopeJson = JSON.stringify(
+      { alg: "HPKE", ciphertext: "abc", enc: "def", key_id: "bb-2026-04", v: 1 },
+      Object.keys({ alg: 0, ciphertext: 0, enc: 0, key_id: 0, v: 0 }).sort(),
+    );
+    expect(typeof envelopeJson).toBe("string");
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: {
+          ...validRequest.payload,
+          compile_secret_envelope: envelopeJson,
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects compile_secret_envelope sent as an object (must be a string)", () => {
+    // Wire-type guard: the envelope must ride as a JSON string, never a
+    // nested object. An object form is a fail-closed 400 with a clear
+    // string-type error.
+    const err = validateBuildRequest({
+      ...validRequest,
+      payload: {
+        ...validRequest.payload,
+        compile_secret_envelope: { hpke: "v1" } as unknown as string,
+      },
+    });
+    expect(err).toContain("payload.compile_secret_envelope");
+    expect(err).toContain("string");
+  });
+
   it("rejects optional string field of wrong type", () => {
     const err = validateBuildRequest({
       ...validRequest,
