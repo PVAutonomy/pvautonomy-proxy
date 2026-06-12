@@ -9,6 +9,11 @@ compatibility_date = "2025-04-01"
 enabled = true
 
 [vars]
+# GHAPP-1: GitHub App auth (replaces the GITHUB_PAT after migration). The
+# app path activates only when GITHUB_APP_PRIVATE_KEY is also set as a
+# secret; until then the worker falls back to GITHUB_PAT.
+GITHUB_APP_ID = "2940147"
+GITHUB_APP_INSTALLATION_ID = "112192181"
 GITHUB_OWNER = "PVAutonomy"
 GITHUB_REPO = "inverter-registry"
 GITHUB_WORKFLOW_FILE = "build-firmware-on-demand.yml"
@@ -27,4 +32,9 @@ id = "4e5072932f4046828079ae436f57e740"
 preview_id = "6f720b4d2907449d8a743428e091ce6f"
 
 # Secrets (set via `wrangler secret put`):
-# GITHUB_PAT — Fine-grained PAT with actions:write on PVAutonomy/inverter-registry
+# GITHUB_APP_PRIVATE_KEY — GitHub App private key as PKCS#8 PEM. GitHub
+#   downloads keys in PKCS#1; convert BEFORE secret put:
+#     openssl pkcs8 -topk8 -nocrypt -in app.pem -out app-pkcs8.pem
+# GITHUB_PAT — DEPRECATED migration fallback. Fine-grained PAT with
+#   actions:write + contents:read on PVAutonomy/inverter-registry. Used only
+#   while the App credentials are incomplete; removed in a later GO.

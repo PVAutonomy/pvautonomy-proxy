@@ -1,4 +1,5 @@
 import type { BuildStatus, Env } from "../types.js";
+import { getGithubToken } from "./auth.js";
 
 const USER_AGENT = "pvautonomy-proxy/0.1.0";
 
@@ -48,7 +49,7 @@ export async function pollGitHubRun(
 
   const response = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${await getGithubToken(env)}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": USER_AGENT,
