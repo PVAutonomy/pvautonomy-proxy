@@ -1,7 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { handleHealth } from "../../src/handlers/health.js";
-import { _resetTokenCacheForTests } from "../../src/github/auth.js";
+import {
+  _resetTokenCacheForTests,
+  _seedTokenCacheForTests,
+} from "../../src/github/auth.js";
 import type { Env } from "../../src/types.js";
+
+// GHAPP-2: PAT fallback removed — handler tests run with App credentials
+// and a pre-seeded token so only their own fetch mocks are exercised.
+function seededEnv(extra: Partial<Env> = {}): Env {
+  _seedTokenCacheForTests("ghp_test");
+  return {
+    GITHUB_APP_ID: "2940147",
+    GITHUB_APP_INSTALLATION_ID: "112192181",
+    GITHUB_APP_PRIVATE_KEY: "test-key-pem",
+    ...extra,
+  } as unknown as Env;
+}
 
 describe("handleHealth", () => {
   beforeEach(() => {
@@ -14,9 +29,7 @@ describe("handleHealth", () => {
       vi.fn(async () => new Response("{}", { status: 200 })),
     );
 
-    const env = {
-      GITHUB_PAT: "ghp_test",
-    } as unknown as Env;
+    const env = seededEnv();
 
     const response = await handleHealth(env);
     expect(response.status).toBe(200);
@@ -35,7 +48,7 @@ describe("handleHealth", () => {
       vi.fn(async () => new Response("{}", { status: 200 })),
     );
 
-    const env = { GITHUB_PAT: "ghp_test" } as unknown as Env;
+    const env = seededEnv();
     const response = await handleHealth(env);
     const data = (await response.json()) as Record<string, unknown>;
 
@@ -55,12 +68,16 @@ describe("handleHealth", () => {
       const { handleHealth: stampedHealth } = await import(
         "../../src/handlers/health.js"
       );
+      // vi.resetModules() gave the dynamic import a FRESH auth.js instance —
+      // seed that instance's cache, not the one from the top-level import.
+      const freshAuth = await import("../../src/github/auth.js");
+      freshAuth._seedTokenCacheForTests("ghp_test");
       vi.stubGlobal(
         "fetch",
         vi.fn(async () => new Response("{}", { status: 200 })),
       );
 
-      const env = { GITHUB_PAT: "ghp_test" } as unknown as Env;
+      const env = seededEnv();
       const response = await stampedHealth(env);
       const data = (await response.json()) as Record<string, unknown>;
 
@@ -80,9 +97,7 @@ describe("handleHealth", () => {
       vi.fn(async () => new Response("", { status: 500 })),
     );
 
-    const env = {
-      GITHUB_PAT: "ghp_test",
-    } as unknown as Env;
+    const env = seededEnv();
 
     const response = await handleHealth(env);
     const data = (await response.json()) as Record<string, unknown>;
@@ -102,22 +117,21 @@ describe("handleHealth — GitHub App auth fields", () => {
     vi.useRealTimers();
   });
 
-  it("reports auth_mode pat, contents ok and null expiry without header", async () => {
+  it("reports auth_mode app, contents ok and null expiry without header", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("[]", { status: 200 })),
     );
 
-    const env = {
-      GITHUB_PAT: "ghp_test",
+    const env = seededEnv({
       GITHUB_OWNER: "PVAutonomy",
       GITHUB_REPO: "inverter-registry",
-    } as unknown as Env;
+    });
     const response = await handleHealth(env);
     const data = (await response.json()) as Record<string, unknown>;
 
     expect(data.status).toBe("ok");
-    expect(data.auth_mode).toBe("pat");
+    expect(data.auth_mode).toBe("app");
     expect(data.github_contents_ok).toBe(true);
     expect(data.token_days_left).toBeNull();
   });
@@ -126,11 +140,10 @@ describe("handleHealth — GitHub App auth fields", () => {
     const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const env = {
-      GITHUB_PAT: "ghp_test",
+    const env = seededEnv({
       GITHUB_OWNER: "PVAutonomy",
       GITHUB_REPO: "inverter-registry",
-    } as unknown as Env;
+    });
     await handleHealth(env);
 
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
@@ -151,11 +164,10 @@ describe("handleHealth — GitHub App auth fields", () => {
       ),
     );
 
-    const env = {
-      GITHUB_PAT: "ghp_test",
+    const env = seededEnv({
       GITHUB_OWNER: "PVAutonomy",
       GITHUB_REPO: "inverter-registry",
-    } as unknown as Env;
+    });
     const response = await handleHealth(env);
     const data = (await response.json()) as Record<string, unknown>;
 
@@ -181,11 +193,10 @@ describe("handleHealth — GitHub App auth fields", () => {
       ),
     );
 
-    const env = {
-      GITHUB_PAT: "ghp_test",
+    const env = seededEnv({
       GITHUB_OWNER: "PVAutonomy",
       GITHUB_REPO: "inverter-registry",
-    } as unknown as Env;
+    });
     const response = await handleHealth(env);
     const data = (await response.json()) as Record<string, unknown>;
 
@@ -208,11 +219,10 @@ describe("handleHealth — GitHub App auth fields", () => {
       ),
     );
 
-    const env = {
-      GITHUB_PAT: "ghp_test",
+    const env = seededEnv({
       GITHUB_OWNER: "PVAutonomy",
       GITHUB_REPO: "inverter-registry",
-    } as unknown as Env;
+    });
     const response = await handleHealth(env);
     const data = (await response.json()) as Record<string, unknown>;
 

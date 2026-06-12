@@ -2,8 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { handleBuildArtifact } from "../../src/handlers/build-artifact.js";
 import type { BuildRecord, Env } from "../../src/types.js";
+import { _seedTokenCacheForTests } from "../../src/github/auth.js";
 
 function createMockEnv(store: Map<string, string> = new Map()): Env {
+  // GHAPP-2: handler suites mock their own GitHub calls; pre-seed the
+  // token cache so no mint round-trip interferes with those mocks.
+  _seedTokenCacheForTests("ghp_test_secret");
   return {
     BUILD_STATE: {
       get: vi.fn(async (key: string, format?: string) => {
@@ -19,7 +23,9 @@ function createMockEnv(store: Map<string, string> = new Map()): Env {
       }),
     } as unknown as KVNamespace,
     API_KEYS: {} as KVNamespace,
-    GITHUB_PAT: "ghp_test_secret",
+    GITHUB_APP_ID: "2940147",
+    GITHUB_APP_INSTALLATION_ID: "112192181",
+    GITHUB_APP_PRIVATE_KEY: "test-key-pem",
     GITHUB_OWNER: "PVAutonomy",
     GITHUB_REPO: "inverter-registry",
     GITHUB_WORKFLOW_FILE: "build-firmware-on-demand.yml",
@@ -148,7 +154,7 @@ describe("handleBuildArtifact", () => {
     expect(response.status).toBe(404);
   });
 
-  it("streams firmware.ota.bin from the private release via GITHUB_PAT", async () => {
+  it("streams firmware.ota.bin from the private release via the proxy's GitHub credentials", async () => {
     const store = new Map([
       [`build:${successBuild.build_id}`, JSON.stringify(successBuild)],
     ]);

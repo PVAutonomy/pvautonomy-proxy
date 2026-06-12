@@ -1,6 +1,6 @@
 import type { Env } from "../types.js";
 import { jsonResponse } from "../errors.js";
-import { getAuthMode, getGithubToken } from "../github/auth.js";
+import { getGithubToken } from "../github/auth.js";
 // ISSUE-7: deploy metadata stamped at build time by scripts/gen-version.mjs
 // (via `npm run deploy` or the deploy workflow); "dev" in tests/dev builds.
 import { BUILT_AT, GIT_SHA } from "../version.generated.js";
@@ -8,7 +8,6 @@ import pkg from "../../package.json";
 
 /** GET /health — public, no auth required. */
 export async function handleHealth(env: Env): Promise<Response> {
-  const authMode = getAuthMode(env);
   let githubOk = false;
   let contentsOk = false;
   let tokenDaysLeft: number | null = null;
@@ -49,7 +48,9 @@ export async function handleHealth(env: Env): Promise<Response> {
     built_at: BUILT_AT,
     github_api_ok: githubOk,
     github_contents_ok: contentsOk,
-    auth_mode: authMode,
+    // GHAPP-2: kept for API stability; PAT fallback removed, app is the
+    // only auth mode.
+    auth_mode: "app",
     token_days_left: tokenDaysLeft,
   });
 }
