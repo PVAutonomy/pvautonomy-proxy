@@ -1,4 +1,5 @@
 import type { ArtifactInfo, BuildRecord, Env } from "../types.js";
+import { getGithubToken } from "./auth.js";
 
 const USER_AGENT = "pvautonomy-proxy/0.1.0";
 
@@ -30,7 +31,7 @@ async function resolveFromWorkflowArtifacts(
 
   const response = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${await getGithubToken(env)}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": USER_AGENT,
@@ -107,7 +108,7 @@ async function resolveFromReleaseAssets(
 
   const response = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${await getGithubToken(env)}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": USER_AGENT,
@@ -195,8 +196,8 @@ function matchReleaseAsset(
  *
  * The browser_download_url stored in ArtifactInfo is unusable for private
  * repos (anonymous access → 404), so we re-resolve the release and return the
- * asset's API `url`, which streams the bytes when fetched with the PAT and
- * `Accept: application/octet-stream`.
+ * asset's API `url`, which streams the bytes when fetched with the GitHub
+ * token and `Accept: application/octet-stream`.
  */
 async function findReleaseAssetApiUrl(
   env: Env,
@@ -207,7 +208,7 @@ async function findReleaseAssetApiUrl(
 
   const response = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${await getGithubToken(env)}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": USER_AGENT,
@@ -229,11 +230,12 @@ async function findReleaseAssetApiUrl(
 }
 
 /**
- * Stream a private GitHub Release asset through the proxy using GITHUB_PAT.
+ * Stream a private GitHub Release asset through the proxy using the GitHub
+ * token (App installation token or legacy PAT).
  *
  * Returns a streaming Response (200) on success, or null when the asset cannot
  * be located or the upstream fetch fails. Never returns browser_download_url
- * content anonymously — the bytes are always pulled with the PAT.
+ * content anonymously — the bytes are always pulled with the token.
  */
 export async function streamReleaseAsset(
   env: Env,
@@ -245,7 +247,7 @@ export async function streamReleaseAsset(
 
   const upstream = await fetch(asset.url, {
     headers: {
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${await getGithubToken(env)}`,
       Accept: "application/octet-stream",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": USER_AGENT,
@@ -275,7 +277,7 @@ export async function streamReleaseAsset(
 async function fetchAssetJson<T>(env: Env, apiUrl: string): Promise<T | null> {
   const response = await fetch(apiUrl, {
     headers: {
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${await getGithubToken(env)}`,
       Accept: "application/octet-stream",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": USER_AGENT,

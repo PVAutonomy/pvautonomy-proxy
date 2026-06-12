@@ -1,4 +1,5 @@
 import type { BuildPayload, Env } from "../types.js";
+import { getGithubToken } from "./auth.js";
 
 export interface DispatchResult {
   run_id: number;
@@ -75,7 +76,7 @@ export async function triggerWorkflowDispatch(
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${await getGithubToken(env)}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": USER_AGENT,
