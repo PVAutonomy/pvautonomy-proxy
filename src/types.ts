@@ -25,6 +25,11 @@ export interface BuildRecord {
   error: string | null;
   payload_hash: string;
   payload: BuildPayload | null;
+  // ISSUE-6: read-side self-heal budget for success-without-artifact
+  // records. Optional + additive: records persisted before this field
+  // existed read as undefined (treated as 0). Internal only — never
+  // exposed via BuildResponse.
+  artifact_resolve_attempts?: number;
 }
 
 export interface ArtifactInfo {

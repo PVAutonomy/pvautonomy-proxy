@@ -20,8 +20,16 @@ vi.mock("../../src/handlers/build-artifact.js", () => ({
   ),
 }));
 
+// Stub the status handler to prove ?refresh=1 threading (ISSUE-6).
+vi.mock("../../src/handlers/build-status.js", () => ({
+  handleBuildStatus: vi.fn(
+    async () => new Response("ok", { status: 200 }),
+  ),
+}));
+
 import { route } from "../../src/router.js";
 import { handleBuildArtifact } from "../../src/handlers/build-artifact.js";
+import { handleBuildStatus } from "../../src/handlers/build-status.js";
 import type { Env } from "../../src/types.js";
 
 function createEnv(): Env {
@@ -69,5 +77,55 @@ describe("router — GET /build/:id/artifact/:name", () => {
     await route(request, createEnv());
     // handleBuildArtifact handled it (asserted above); confirm it was reached.
     expect(handleBuildArtifact).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ISSUE-6: the router threads ?refresh=1 to the status handler.
+describe("router — GET /build/:id ?refresh threading", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("passes refresh: true when ?refresh=1 is present", async () => {
+    const request = new Request(
+      `https://proxy.example/build/${BUILD_ID}?refresh=1`,
+      { method: "GET", headers: { Authorization: "Bearer pva_test" } },
+    );
+
+    const response = await route(request, createEnv());
+    expect(response.status).toBe(200);
+    expect(handleBuildStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      BUILD_ID,
+      { refresh: true },
+    );
+  });
+
+  it("passes refresh: false without the parameter", async () => {
+    const request = new Request(`https://proxy.example/build/${BUILD_ID}`, {
+      method: "GET",
+      headers: { Authorization: "Bearer pva_test" },
+    });
+
+    await route(request, createEnv());
+    expect(handleBuildStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      BUILD_ID,
+      { refresh: false },
+    );
+  });
+
+  it("treats refresh values other than 1 as false", async () => {
+    const request = new Request(
+      `https://proxy.example/build/${BUILD_ID}?refresh=true`,
+      { method: "GET", headers: { Authorization: "Bearer pva_test" } },
+    );
+
+    await route(request, createEnv());
+    expect(handleBuildStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      BUILD_ID,
+      { refresh: false },
+    );
   });
 });

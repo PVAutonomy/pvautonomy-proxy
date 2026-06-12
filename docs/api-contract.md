@@ -115,6 +115,26 @@ Poll build status. Non-terminal builds trigger a live GitHub API poll.
 }
 ```
 
+**Terminal records (ISSUE-6):**
+
+- Terminal builds (`success` | `failed` | `timeout`) are normally served from
+  the KV cache without any GitHub API traffic.
+- **Self-heal:** a cached `success` record with `artifact: null` (artifact
+  resolution failed transiently on the poll that first saw the run complete)
+  gets artifact resolution re-attempted on read. A successful re-resolve is
+  persisted. Read-side heal attempts are bounded to **5 per record** (internal
+  counter, not exposed in the response); after that the record is served
+  as-is and `?refresh=1` is the escape hatch.
+- **`?refresh=1`** (query parameter): forces a GitHub re-poll of the run
+  status plus artifact re-resolution for terminal records, then persists and
+  returns the updated record. Status changes only to what GitHub reports
+  (a re-run may legitimately move a `failed` record back to `running`; its
+  stale `error`/`completed_at` are cleared in that case). A healthy
+  `artifact` is never overwritten by a failed re-resolution. Refresh ignores
+  the self-heal attempt budget. Any value other than `1` is treated as
+  absent. On non-terminal records the flag is a no-op (they poll live
+  anyway).
+
 ---
 
 ### `GET /build/{build_id}/artifact/{name}`

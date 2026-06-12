@@ -14,7 +14,9 @@ vi.mock("../../src/github/artifacts.js", () => ({
 }));
 
 import { handleBuildStatus } from "../../src/handlers/build-status.js";
-import type { BuildRecord, Env } from "../../src/types.js";
+import { resolveArtifacts } from "../../src/github/artifacts.js";
+import { pollGitHubRun } from "../../src/github/poll.js";
+import type { ArtifactInfo, BuildRecord, Env } from "../../src/types.js";
 
 function createMockEnv(store: Map<string, string> = new Map()): Env {
   return {
@@ -132,5 +134,232 @@ describe("handleBuildStatus", () => {
     const response = await handleBuildStatus(env, oldBuild.build_id);
     const data = (await response.json()) as Record<string, unknown>;
     expect(data.status).toBe("timeout");
+  });
+});
+
+// ISSUE-6: self-healing records + ?refresh=1
+describe("handleBuildStatus — ISSUE-6", () => {
+  const ARTIFACT: ArtifactInfo = {
+    manifest_url: "https://example.com/manifest.json",
+    firmware_url: "https://example.com/firmware.ota.bin",
+    sha256: "deadbeef",
+    size_bytes: 500000,
+  };
+
+  // Poisoned record: GHA succeeded, but the first artifact resolution
+  // transiently failed and null was persisted terminal.
+  // Deliberately has NO artifact_resolve_attempts field — proves records
+  // persisted before the field existed are handled (read as 0).
+  const poisonedBuild: BuildRecord = {
+    ...baseBuild,
+    status: "success",
+    progress: 100,
+    completed_at: new Date().toISOString(),
+    artifact: null,
+  };
+
+  function envWith(record: BuildRecord): {
+    env: Env;
+    store: Map<string, string>;
+  } {
+    const store = new Map([
+      [`build:${record.build_id}`, JSON.stringify(record)],
+    ]);
+    return { env: createMockEnv(store), store };
+  }
+
+  function storedRecord(store: Map<string, string>, id: string): BuildRecord {
+    return JSON.parse(store.get(`build:${id}`)!) as BuildRecord;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // (a) poisoned record is repaired on a later poll
+  it("heals a success record with null artifact when resolution succeeds", async () => {
+    const { env, store } = envWith(poisonedBuild);
+    vi.mocked(resolveArtifacts).mockResolvedValueOnce(ARTIFACT);
+
+    const response = await handleBuildStatus(env, poisonedBuild.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.status).toBe("success");
+    expect(data.artifact).toEqual(ARTIFACT);
+    // Repair is persisted, with the attempt counted
+    const persisted = storedRecord(store, poisonedBuild.build_id);
+    expect(persisted.artifact).toEqual(ARTIFACT);
+    expect(persisted.artifact_resolve_attempts).toBe(1);
+    // Healing re-resolves artifacts only — no GitHub run re-poll
+    expect(pollGitHubRun).not.toHaveBeenCalled();
+  });
+
+  // (b) attempts are counted on failure and the budget is enforced
+  it("increments the attempt counter when heal resolution fails", async () => {
+    const { env, store } = envWith(poisonedBuild);
+    // default resolveArtifacts mock resolves null (failure)
+
+    const response = await handleBuildStatus(env, poisonedBuild.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.artifact).toBeNull();
+    const persisted = storedRecord(store, poisonedBuild.build_id);
+    expect(persisted.artifact).toBeNull();
+    expect(persisted.artifact_resolve_attempts).toBe(1);
+    expect(resolveArtifacts).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops healing once the attempt budget is exhausted", async () => {
+    const exhausted: BuildRecord = {
+      ...poisonedBuild,
+      artifact_resolve_attempts: 5,
+    };
+    const { env } = envWith(exhausted);
+
+    const response = await handleBuildStatus(env, exhausted.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.artifact).toBeNull();
+    expect(resolveArtifacts).not.toHaveBeenCalled();
+    expect(env.BUILD_STATE.put).not.toHaveBeenCalled();
+  });
+
+  // Amendment 2: heal is success-only
+  it("never heals failed or timeout records (zero resolve calls)", async () => {
+    for (const status of ["failed", "timeout"] as const) {
+      vi.clearAllMocks();
+      const terminal: BuildRecord = {
+        ...poisonedBuild,
+        status,
+        error: `Build ${status}`,
+      };
+      const { env } = envWith(terminal);
+
+      const response = await handleBuildStatus(env, terminal.build_id);
+      const data = (await response.json()) as Record<string, unknown>;
+
+      expect(data.status).toBe(status);
+      expect(resolveArtifacts).not.toHaveBeenCalled();
+      expect(pollGitHubRun).not.toHaveBeenCalled();
+      expect(env.BUILD_STATE.put).not.toHaveBeenCalled();
+    }
+  });
+
+  // (c) ?refresh=1 re-polls GitHub and re-resolves — even past the budget
+  it("refresh re-polls GitHub and re-resolves, ignoring the heal budget", async () => {
+    const exhausted: BuildRecord = {
+      ...poisonedBuild,
+      artifact_resolve_attempts: 5,
+    };
+    const { env, store } = envWith(exhausted);
+    vi.mocked(pollGitHubRun).mockResolvedValueOnce({
+      status: "success",
+      progress: 100,
+      run_url: exhausted.github_run_url!,
+    });
+    vi.mocked(resolveArtifacts).mockResolvedValueOnce(ARTIFACT);
+
+    const response = await handleBuildStatus(env, exhausted.build_id, {
+      refresh: true,
+    });
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(pollGitHubRun).toHaveBeenCalledWith(env, exhausted.github_run_id);
+    expect(resolveArtifacts).toHaveBeenCalledTimes(1);
+    expect(data.artifact).toEqual(ARTIFACT);
+    const persisted = storedRecord(store, exhausted.build_id);
+    expect(persisted.artifact).toEqual(ARTIFACT);
+    // Amendment 1: refresh neither checks nor increments the counter
+    expect(persisted.artifact_resolve_attempts).toBe(5);
+  });
+
+  it("refresh keeps a healthy artifact when re-resolution fails", async () => {
+    const healthy: BuildRecord = {
+      ...poisonedBuild,
+      artifact: ARTIFACT,
+    };
+    const { env, store } = envWith(healthy);
+    vi.mocked(pollGitHubRun).mockResolvedValueOnce({
+      status: "success",
+      progress: 100,
+      run_url: healthy.github_run_url!,
+    });
+    // default resolveArtifacts mock resolves null (failure)
+
+    const response = await handleBuildStatus(env, healthy.build_id, {
+      refresh: true,
+    });
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.artifact).toEqual(ARTIFACT);
+    expect(storedRecord(store, healthy.build_id).artifact).toEqual(ARTIFACT);
+  });
+
+  it("refresh adopts a live state reported by GitHub after a re-run", async () => {
+    const failed: BuildRecord = {
+      ...poisonedBuild,
+      status: "failed",
+      error: "Build failed",
+    };
+    const { env, store } = envWith(failed);
+    vi.mocked(pollGitHubRun).mockResolvedValueOnce({
+      status: "running",
+      progress: 50,
+      run_url: failed.github_run_url!,
+    });
+
+    const response = await handleBuildStatus(env, failed.build_id, {
+      refresh: true,
+    });
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.status).toBe("running");
+    expect(data.error).toBeNull();
+    const persisted = storedRecord(store, failed.build_id);
+    expect(persisted.completed_at).toBeNull();
+    expect(resolveArtifacts).not.toHaveBeenCalled();
+  });
+
+  // (d) healthy terminal record: pure cache hit, zero GitHub traffic
+  it("returns a healthy terminal record from cache with zero GitHub calls", async () => {
+    const healthy: BuildRecord = {
+      ...poisonedBuild,
+      artifact: ARTIFACT,
+    };
+    const { env } = envWith(healthy);
+    const fetchSpy = vi.fn();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    try {
+      const response = await handleBuildStatus(env, healthy.build_id);
+      const data = (await response.json()) as Record<string, unknown>;
+      expect(data.artifact).toEqual(ARTIFACT);
+      expect(pollGitHubRun).not.toHaveBeenCalled();
+      expect(resolveArtifacts).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(env.BUILD_STATE.put).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // (e) response shape is unchanged — internal fields never leak
+  it("keeps the response shape; artifact_resolve_attempts never leaks", async () => {
+    const { env } = envWith(poisonedBuild);
+    vi.mocked(resolveArtifacts).mockResolvedValueOnce(ARTIFACT);
+
+    const response = await handleBuildStatus(env, poisonedBuild.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(Object.keys(data).sort()).toEqual([
+      "artifact",
+      "build_id",
+      "created_at",
+      "error",
+      "progress",
+      "run_url",
+      "status",
+      "updated_at",
+    ]);
   });
 });
