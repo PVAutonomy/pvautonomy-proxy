@@ -20,6 +20,14 @@ function isTerminal(status: BuildStatus): boolean {
 
 /** GET /build/:id — lazy-refresh from GitHub if non-terminal.
  *
+ * ISSUE-6 follow-up (deferred success): a run that GitHub reports as
+ * success is only reported "success" to callers once its artifact info is
+ * resolved — until then the record stays non-terminal ("running",
+ * progress 95) so polling callers retry, bounded by
+ * MAX_ARTIFACT_RESOLVE_ATTEMPTS; after the budget, terminal success
+ * without artifact is persisted (previous behavior, ?refresh=1 as last
+ * resort).
+ *
  * ISSUE-6 additions for terminal records:
  * - Self-heal: status "success" with artifact null gets artifact resolution
  *   re-attempted on read (bounded by MAX_ARTIFACT_RESOLVE_ATTEMPTS); a
@@ -102,11 +110,46 @@ export async function handleBuildStatus(
       record.github_run_url = ghStatus.run_url;
       record.updated_at = new Date().toISOString();
 
-      // On success → resolve artifacts
+      // On success → resolve artifacts BEFORE reporting success.
+      // ISSUE-6 follow-up: callers stop polling on "success", so reporting
+      // success without artifact info loses the race against GitHub's
+      // release-API lag (incidents dd8ed40d 2026-06-11, 4121c62c
+      // 2026-06-12: resolution returned null in the seconds window right
+      // after run completion although all assets were published). Defer:
+      // stay non-terminal ("running", progress 95) so the polling pipeline
+      // naturally retries, bounded by MAX_ARTIFACT_RESOLVE_ATTEMPTS. Only
+      // after the budget is exhausted is success-without-artifact persisted
+      // (previous behavior — ops' ?refresh=1 remains the last resort).
       if (record.status === "success") {
-        record.completed_at = new Date().toISOString();
-        record.artifact = await resolveArtifacts(env, record);
-        await releaseBuildLock(env.BUILD_STATE, record.customer_id, record.build_id);
+        const resolved = await resolveArtifacts(env, record);
+        const attempts = record.artifact_resolve_attempts ?? 0;
+        if (resolved) {
+          record.artifact = resolved;
+          record.completed_at = new Date().toISOString();
+          await releaseBuildLock(env.BUILD_STATE, record.customer_id, record.build_id);
+        } else if (attempts < MAX_ARTIFACT_RESOLVE_ATTEMPTS) {
+          record.artifact_resolve_attempts = attempts + 1;
+          record.status = "running";
+          record.progress = 95;
+          console.warn(
+            `[build ${record.build_id}] run succeeded but artifact ` +
+              `resolution returned null (attempt ${attempts + 1}/` +
+              `${MAX_ARTIFACT_RESOLVE_ATTEMPTS}) — deferring success, ` +
+              `caller will re-poll`,
+          );
+          // Lock deliberately NOT released: the build is not done for the
+          // caller until its artifact exists (or the budget is exhausted).
+        } else {
+          record.artifact = null;
+          record.completed_at = new Date().toISOString();
+          console.warn(
+            `[build ${record.build_id}] artifact resolution budget ` +
+              `exhausted (${MAX_ARTIFACT_RESOLVE_ATTEMPTS} attempts) — ` +
+              `persisting terminal success without artifact; ` +
+              `?refresh=1 is the remaining repair path`,
+          );
+          await releaseBuildLock(env.BUILD_STATE, record.customer_id, record.build_id);
+        }
       }
 
       // On failure → release lock

@@ -2,6 +2,12 @@ name = "pvautonomy-proxy"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
 
+# ISSUE-6 follow-up: artifact-resolution failures are diagnosed via
+# console.warn — without observability those logs are dropped, so the
+# silent-null failure class would stay invisible in production.
+[observability]
+enabled = true
+
 [vars]
 GITHUB_OWNER = "PVAutonomy"
 GITHUB_REPO = "inverter-registry"

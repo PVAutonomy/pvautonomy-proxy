@@ -37,7 +37,15 @@ async function resolveFromWorkflowArtifacts(
     },
   });
 
-  if (!response.ok) return null;
+  if (!response.ok) {
+    // ISSUE-6 follow-up: silent nulls made resolution failures
+    // undiagnosable — say WHY (visible in Workers Logs).
+    console.warn(
+      `[artifacts] workflow-artifacts list for run ${runId} failed: ` +
+        `HTTP ${response.status}`,
+    );
+    return null;
+  }
 
   const data = (await response.json()) as {
     artifacts: Array<{
@@ -50,6 +58,8 @@ async function resolveFromWorkflowArtifacts(
   const fwArtifact = data.artifacts.find(
     (a) => a.name === "firmware" || a.name.includes("firmware"),
   );
+  // No warn here: the build workflow publishes release assets, not workflow
+  // artifacts, so "none found" is the expected path, not a failure.
   if (!fwArtifact) return null;
 
   return {
@@ -104,7 +114,13 @@ async function resolveFromReleaseAssets(
     },
   });
 
-  if (!response.ok) return null;
+  if (!response.ok) {
+    console.warn(
+      `[artifacts] release list for build ${record.build_id} failed: ` +
+        `HTTP ${response.status}`,
+    );
+    return null;
+  }
 
   const releases = (await response.json()) as Release[];
 
@@ -136,6 +152,10 @@ async function resolveFromReleaseAssets(
       }
 
       // Manifest fetch failed — return URLs without hash
+      console.warn(
+        `[artifacts] build ${record.build_id}: manifest.json fetch failed ` +
+          `for release ${release.tag_name} — returning URLs without sha256`,
+      );
       return {
         manifest_url: manifest.browser_download_url,
         firmware_url: firmware.browser_download_url,
@@ -145,6 +165,11 @@ async function resolveFromReleaseAssets(
     }
   }
 
+  console.warn(
+    `[artifacts] build ${record.build_id}: no release with manifest+firmware ` +
+      `assets matching device "${deviceName}" among ${releases.length} ` +
+      `releases (eventual-consistency lag or wrong tag?)`,
+  );
   return null;
 }
 
@@ -257,11 +282,17 @@ async function fetchAssetJson<T>(env: Env, apiUrl: string): Promise<T | null> {
     },
   });
 
-  if (!response.ok) return null;
+  if (!response.ok) {
+    console.warn(
+      `[artifacts] asset fetch ${apiUrl} failed: HTTP ${response.status}`,
+    );
+    return null;
+  }
 
   try {
     return (await response.json()) as T;
   } catch {
+    console.warn(`[artifacts] asset ${apiUrl} is not parseable JSON`);
     return null;
   }
 }
