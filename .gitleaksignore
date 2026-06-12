@@ -1,0 +1,7 @@
+# gitleaks false positives — test fixtures only (verified 2026-06-12 baseline
+# scan, GO-L1). auth.test.ts builds a PEM from a per-run generated WebCrypto
+# test key; the others are dummy encrypted_secrets fixtures. Add new
+# fingerprints individually after manual review.
+2a9bed5e99f71bfd828fe3e16eea1b3837b5c7c2:test/github/auth.test.ts:private-key:31
+a7cd8571760e3e0124f7c412d1bac310566fcca0:test/handlers/build-create.test.ts:generic-api-key:327
+a7cd8571760e3e0124f7c412d1bac310566fcca0:test/guards/validation.test.ts:generic-api-key:329
