@@ -1,0 +1,53 @@
+# ISSUE-7: manually-triggered worker deploy with version stamping.
+#
+# Trigger is workflow_dispatch ONLY (Planner decision): deploys stay
+# explicit operator actions — no push-triggered deploys, so a merge to main
+# never silently changes the live worker.
+#
+# Required repo secret (operator-created, never committed):
+#   CLOUDFLARE_API_TOKEN — Cloudflare API token with Workers deploy
+#   permission for the pvautonomy-proxy worker.
+#
+# The deployed commit becomes visible at GET /health (git_sha + built_at),
+# stamped by scripts/gen-version.mjs — the same mechanism `npm run deploy`
+# uses locally.
+name: Deploy worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npx vitest run
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Stamp deploy version (git_sha + built_at)
+        run: node scripts/gen-version.mjs
+
+      - name: Deploy via wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy
+
+      - name: Summary
+        run: |
+          echo "Deployed $(git rev-parse --short HEAD) — verify via GET /health (git_sha must match)." >> "$GITHUB_STEP_SUMMARY"
