@@ -31,12 +31,18 @@ import { route } from "../../src/router.js";
 import { handleBuildArtifact } from "../../src/handlers/build-artifact.js";
 import { handleBuildStatus } from "../../src/handlers/build-status.js";
 import type { Env } from "../../src/types.js";
+import { _seedTokenCacheForTests } from "../../src/github/auth.js";
 
 function createEnv(): Env {
+  // GHAPP-2: handler suites mock their own GitHub calls; pre-seed the
+  // token cache so no mint round-trip interferes with those mocks.
+  _seedTokenCacheForTests("ghp_test");
   return {
     BUILD_STATE: {} as KVNamespace,
     API_KEYS: {} as KVNamespace,
-    GITHUB_PAT: "ghp_test",
+    GITHUB_APP_ID: "2940147",
+    GITHUB_APP_INSTALLATION_ID: "112192181",
+    GITHUB_APP_PRIVATE_KEY: "test-key-pem",
     GITHUB_OWNER: "PVAutonomy",
     GITHUB_REPO: "inverter-registry",
     GITHUB_WORKFLOW_FILE: "build-firmware-on-demand.yml",

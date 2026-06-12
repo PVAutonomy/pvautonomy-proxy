@@ -3,30 +3,15 @@ import type { Env } from "../types.js";
 const USER_AGENT = "pvautonomy-proxy/0.1.0";
 
 /**
- * GHAPP-1: central GitHub auth helper.
+ * GHAPP-2: central GitHub auth helper — GitHub App installation tokens only.
  *
- * Two auth modes, selected per request by configuration:
+ * GITHUB_APP_ID + GITHUB_APP_INSTALLATION_ID + GITHUB_APP_PRIVATE_KEY must
+ * all be configured: mint an installation token (RS256 app JWT →
+ * POST /app/installations/{id}/access_tokens) and cache it in-memory.
  *
- *  - "app": GITHUB_APP_ID + GITHUB_APP_INSTALLATION_ID + GITHUB_APP_PRIVATE_KEY
- *    are all set → mint a GitHub App installation token (RS256 app JWT →
- *    POST /app/installations/{id}/access_tokens) and cache it in-memory.
- *  - "pat": anything missing → fall back to the legacy GITHUB_PAT secret.
- *
- * The fallback is deliberate migration behavior: the [vars] GITHUB_APP_ID /
- * GITHUB_APP_INSTALLATION_ID ship with the code, but the
- * GITHUB_APP_PRIVATE_KEY secret is set in a later GO. With IDs present but
- * the key missing the worker must keep using the PAT (not throw), so the
- * merge stays deployable before the secret exists.
+ * The legacy GITHUB_PAT fallback (GHAPP-1 migration switch) was removed
+ * after the cutover was live-verified end-to-end on 2026-06-12.
  */
-
-/** Which credential source getGithubToken(env) will use. */
-export function getAuthMode(env: Env): "app" | "pat" {
-  return env.GITHUB_APP_ID &&
-    env.GITHUB_APP_INSTALLATION_ID &&
-    env.GITHUB_APP_PRIVATE_KEY
-    ? "app"
-    : "pat";
-}
 
 interface CachedToken {
   token: string;
@@ -48,20 +33,31 @@ export function _resetTokenCacheForTests(): void {
 }
 
 /**
+ * Test-only: pre-seed the cache so handler tests exercise their own fetch
+ * mocks without a real mint round-trip (GHAPP-2 replaced the PAT fixtures
+ * the handler suites previously relied on).
+ */
+export function _seedTokenCacheForTests(token: string): void {
+  cachedToken = { token, reuseUntilMs: Date.now() + 3_600_000 };
+}
+
+/**
  * Resolve the bearer token for GitHub API calls.
  *
- * App path: returns a cached installation token while it has more than
- * 10 minutes of lifetime left, otherwise mints a fresh one. PAT path:
- * returns the PAT as-is. Throws only when neither credential source is
- * configured at all.
+ * Returns a cached installation token while it has more than 10 minutes
+ * of lifetime left, otherwise mints a fresh one. Throws when the App
+ * credentials are not fully configured.
  */
 export async function getGithubToken(env: Env): Promise<string> {
-  if (getAuthMode(env) === "pat") {
-    if (env.GITHUB_PAT) return env.GITHUB_PAT;
+  if (
+    !env.GITHUB_APP_ID ||
+    !env.GITHUB_APP_INSTALLATION_ID ||
+    !env.GITHUB_APP_PRIVATE_KEY
+  ) {
     throw new Error(
-      "No GitHub credentials configured: set GITHUB_APP_ID + " +
-        "GITHUB_APP_INSTALLATION_ID + GITHUB_APP_PRIVATE_KEY (app auth) " +
-        "or GITHUB_PAT (legacy fallback).",
+      "GitHub App credentials incomplete: GITHUB_APP_ID + " +
+        "GITHUB_APP_INSTALLATION_ID (wrangler.toml [vars]) and " +
+        "GITHUB_APP_PRIVATE_KEY (secret, PKCS#8 PEM) are all required.",
     );
   }
 

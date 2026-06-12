@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getGithubToken,
-  getAuthMode,
   _resetTokenCacheForTests,
 } from "../../src/github/auth.js";
 import type { Env } from "../../src/types.js";
@@ -63,74 +62,40 @@ function mintFetchMock(token: string, expiresAt: string) {
   );
 }
 
-describe("getAuthMode", () => {
-  it("is pat when only GITHUB_PAT is set", () => {
-    const env = { GITHUB_PAT: "ghp_test" } as unknown as Env;
-    expect(getAuthMode(env)).toBe("pat");
-  });
-
-  it("is pat when App IDs are set but the private key is missing", () => {
-    const env = {
-      GITHUB_PAT: "ghp_test",
-      GITHUB_APP_ID: "2940147",
-      GITHUB_APP_INSTALLATION_ID: "112192181",
-    } as unknown as Env;
-    expect(getAuthMode(env)).toBe("pat");
-  });
-
-  it("is pat when the key is set but an ID is missing", () => {
-    const env = {
-      GITHUB_PAT: "ghp_test",
-      GITHUB_APP_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----",
-      GITHUB_APP_INSTALLATION_ID: "112192181",
-    } as unknown as Env;
-    expect(getAuthMode(env)).toBe("pat");
-  });
-
-  it("is app when all three App credentials are set", () => {
-    const env = {
-      GITHUB_APP_ID: "2940147",
-      GITHUB_APP_INSTALLATION_ID: "112192181",
-      GITHUB_APP_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----",
-    } as unknown as Env;
-    expect(getAuthMode(env)).toBe("app");
-  });
-});
-
-describe("getGithubToken — PAT fallback", () => {
+describe("getGithubToken — credential guard", () => {
   beforeEach(() => {
     _resetTokenCacheForTests();
     vi.restoreAllMocks();
   });
 
-  it("returns the PAT without any network call", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const env = { GITHUB_PAT: "ghp_test" } as unknown as Env;
-    await expect(getGithubToken(env)).resolves.toBe("ghp_test");
-    expect(fetchMock).not.toHaveBeenCalled();
+  it("throws a clear error when nothing is configured", async () => {
+    const env = {} as unknown as Env;
+    await expect(getGithubToken(env)).rejects.toThrow(
+      /GitHub App credentials incomplete/,
+    );
   });
 
-  it("falls back to the PAT when App IDs are set but the key is missing", async () => {
-    // Migration window: wrangler.toml [vars] ship before the
-    // GITHUB_APP_PRIVATE_KEY secret is set — must NOT throw.
+  it("throws when the private-key secret is missing (GHAPP-2: no PAT fallback)", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const env = {
-      GITHUB_PAT: "ghp_test",
       GITHUB_APP_ID: "2940147",
       GITHUB_APP_INSTALLATION_ID: "112192181",
     } as unknown as Env;
-    await expect(getGithubToken(env)).resolves.toBe("ghp_test");
+    await expect(getGithubToken(env)).rejects.toThrow(
+      /GitHub App credentials incomplete/,
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("throws a clear error when no credential source is configured", async () => {
-    const env = {} as unknown as Env;
+  it("throws when an ID is missing even though the key is set", async () => {
+    const env = {
+      GITHUB_APP_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----",
+      GITHUB_APP_INSTALLATION_ID: "112192181",
+    } as unknown as Env;
     await expect(getGithubToken(env)).rejects.toThrow(
-      /No GitHub credentials configured/,
+      /GitHub App credentials incomplete/,
     );
   });
 });

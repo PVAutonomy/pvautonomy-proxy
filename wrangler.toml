@@ -9,9 +9,8 @@ compatibility_date = "2025-04-01"
 enabled = true
 
 [vars]
-# GHAPP-1: GitHub App auth (replaces the GITHUB_PAT after migration). The
-# app path activates only when GITHUB_APP_PRIVATE_KEY is also set as a
-# secret; until then the worker falls back to GITHUB_PAT.
+# GHAPP-2: GitHub App auth (app "pvautonomy-proxy", installed only on
+# PVAutonomy/inverter-registry with Actions:RW + Contents:RO).
 GITHUB_APP_ID = "2940147"
 GITHUB_APP_INSTALLATION_ID = "112192181"
 GITHUB_OWNER = "PVAutonomy"
@@ -35,6 +34,3 @@ preview_id = "6f720b4d2907449d8a743428e091ce6f"
 # GITHUB_APP_PRIVATE_KEY — GitHub App private key as PKCS#8 PEM. GitHub
 #   downloads keys in PKCS#1; convert BEFORE secret put:
 #     openssl pkcs8 -topk8 -nocrypt -in app.pem -out app-pkcs8.pem
-# GITHUB_PAT — DEPRECATED migration fallback. Fine-grained PAT with
-#   actions:write + contents:read on PVAutonomy/inverter-registry. Used only
-#   while the App credentials are incomplete; removed in a later GO.

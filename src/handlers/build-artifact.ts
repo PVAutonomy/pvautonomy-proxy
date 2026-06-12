@@ -17,7 +17,8 @@ function isAllowedArtifact(name: string): name is ArtifactName {
  * GET /build/:id/artifact/:name
  *
  * Streams a build artifact (firmware.ota.bin or manifest.json) from the
- * private GitHub Release through the proxy using GITHUB_PAT. HA calls this
+ * private GitHub Release through the proxy using the GitHub App
+ * installation token. HA calls this
  * after a successful build to fetch the firmware for OTA install.
  */
 export async function handleBuildArtifact(

@@ -105,18 +105,13 @@ export interface Env {
   API_KEYS: KVNamespace;
 
   // Secrets (set via `wrangler secret put`)
-  // GHAPP-1: DEPRECATED — legacy fallback during the GitHub-App migration.
-  // Used only when the App credentials below are incomplete. Removed in a
-  // later GO once the App path is verified in production.
-  GITHUB_PAT?: string;
   // GHAPP-1: GitHub App private key, PKCS#8 PEM (operator converts the
   // PKCS#1 download via `openssl pkcs8 -topk8 -nocrypt` before secret put).
+  // Optional in the type so misconfiguration fails with the clear error in
+  // getGithubToken rather than a TypeScript lie at the call sites.
   GITHUB_APP_PRIVATE_KEY?: string;
 
   // Vars (set in wrangler.toml)
-  // GHAPP-1: App auth identifiers. Optional during the migration phase —
-  // when either is unset (or the private-key secret is missing) the worker
-  // falls back to GITHUB_PAT.
   GITHUB_APP_ID?: string;
   GITHUB_APP_INSTALLATION_ID?: string;
   GITHUB_OWNER: string;
