@@ -115,6 +115,20 @@ Poll build status. Non-terminal builds trigger a live GitHub API poll.
 }
 ```
 
+**Deferred success (ISSUE-6 follow-up):** `success` is only reported once
+artifact info is resolved. When the GitHub run is already successful but
+artifact resolution transiently returns null (release-API lag in the seconds
+right after run completion), the record stays **non-terminal** —
+`status: "running"`, `progress: 95` — so polling callers naturally retry.
+The deferral is bounded to **5 resolution attempts** (the same internal
+counter as the self-heal below); after the budget, terminal `success` with
+`artifact: null` is persisted and `?refresh=1` remains the repair path.
+While deferred, the customer's build lock stays held (a build is not done
+for the caller until its artifact exists); the build-timeout check still
+applies and wins worst-case (fail-closed). Resolution failures are logged
+with their cause (HTTP status / no matching release / manifest fetch
+failure) via Workers Logs.
+
 **Terminal records (ISSUE-6):**
 
 - Terminal builds (`success` | `failed` | `timeout`) are normally served from

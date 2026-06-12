@@ -13,9 +13,16 @@ vi.mock("../../src/github/artifacts.js", () => ({
   resolveArtifacts: vi.fn(async () => null),
 }));
 
+// ISSUE-6 follow-up: mock the lock module so deferral tests can assert
+// whether the customer build lock is held or released.
+vi.mock("../../src/guards/concurrency.js", () => ({
+  releaseBuildLock: vi.fn(async () => {}),
+}));
+
 import { handleBuildStatus } from "../../src/handlers/build-status.js";
 import { resolveArtifacts } from "../../src/github/artifacts.js";
 import { pollGitHubRun } from "../../src/github/poll.js";
+import { releaseBuildLock } from "../../src/guards/concurrency.js";
 import type { ArtifactInfo, BuildRecord, Env } from "../../src/types.js";
 
 function createMockEnv(store: Map<string, string> = new Map()): Env {
@@ -349,6 +356,175 @@ describe("handleBuildStatus — ISSUE-6", () => {
     vi.mocked(resolveArtifacts).mockResolvedValueOnce(ARTIFACT);
 
     const response = await handleBuildStatus(env, poisonedBuild.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(Object.keys(data).sort()).toEqual([
+      "artifact",
+      "build_id",
+      "created_at",
+      "error",
+      "progress",
+      "run_url",
+      "status",
+      "updated_at",
+    ]);
+  });
+});
+
+// ISSUE-6 follow-up: deferred success — "success" is only reported once
+// artifact info is resolved (bounded), so callers that stop polling on
+// success can no longer lose the race against GitHub release-API lag.
+describe("handleBuildStatus — deferred success", () => {
+  const ARTIFACT: ArtifactInfo = {
+    manifest_url: "https://example.com/manifest.json",
+    firmware_url: "https://example.com/firmware.ota.bin",
+    sha256: "deadbeef",
+    size_bytes: 500000,
+  };
+
+  function envWith(record: BuildRecord): {
+    env: Env;
+    store: Map<string, string>;
+  } {
+    const store = new Map([
+      [`build:${record.build_id}`, JSON.stringify(record)],
+    ]);
+    return { env: createMockEnv(store), store };
+  }
+
+  function storedRecord(store: Map<string, string>, id: string): BuildRecord {
+    return JSON.parse(store.get(`build:${id}`)!) as BuildRecord;
+  }
+
+  function ghSuccess() {
+    vi.mocked(pollGitHubRun).mockResolvedValueOnce({
+      status: "success",
+      progress: 100,
+      run_url: baseBuild.github_run_url!,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // (a) run success + resolve null + attempts 0 → deferral
+  it("defers success when the run is green but the artifact is unresolved", async () => {
+    const { env, store } = envWith(baseBuild);
+    ghSuccess();
+    // default resolveArtifacts mock resolves null
+
+    const response = await handleBuildStatus(env, baseBuild.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.status).toBe("running");
+    expect(data.progress).toBe(95);
+    expect(data.artifact).toBeNull();
+
+    const persisted = storedRecord(store, baseBuild.build_id);
+    expect(persisted.status).toBe("running");
+    expect(persisted.progress).toBe(95);
+    expect(persisted.artifact_resolve_attempts).toBe(1);
+    expect(persisted.completed_at).toBeNull();
+    expect(releaseBuildLock).not.toHaveBeenCalled();
+  });
+
+  // (b) later poll resolves → terminal success, lock released
+  it("completes the deferred build once the artifact resolves", async () => {
+    const deferred: BuildRecord = {
+      ...baseBuild,
+      status: "running",
+      progress: 95,
+      artifact_resolve_attempts: 2,
+    };
+    const { env, store } = envWith(deferred);
+    ghSuccess();
+    vi.mocked(resolveArtifacts).mockResolvedValueOnce(ARTIFACT);
+
+    const response = await handleBuildStatus(env, deferred.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.status).toBe("success");
+    expect(data.artifact).toEqual(ARTIFACT);
+
+    const persisted = storedRecord(store, deferred.build_id);
+    expect(persisted.status).toBe("success");
+    expect(persisted.artifact).toEqual(ARTIFACT);
+    expect(persisted.completed_at).toBeTruthy();
+    expect(releaseBuildLock).toHaveBeenCalledTimes(1);
+  });
+
+  // (c) budget exhausted → today's fallback (terminal success, null artifact)
+  it("persists terminal success without artifact after the deferral budget", async () => {
+    const exhausted: BuildRecord = {
+      ...baseBuild,
+      status: "running",
+      progress: 95,
+      artifact_resolve_attempts: 5,
+    };
+    const { env, store } = envWith(exhausted);
+    ghSuccess();
+    // resolve stays null
+
+    const response = await handleBuildStatus(env, exhausted.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.status).toBe("success");
+    expect(data.artifact).toBeNull();
+
+    const persisted = storedRecord(store, exhausted.build_id);
+    expect(persisted.status).toBe("success");
+    expect(persisted.artifact).toBeNull();
+    expect(persisted.artifact_resolve_attempts).toBe(5);
+    expect(persisted.completed_at).toBeTruthy();
+    expect(releaseBuildLock).toHaveBeenCalledTimes(1);
+  });
+
+  // (d) failure/timeout from GitHub → immediate terminal, deferral untouched
+  it("keeps run failures immediately terminal", async () => {
+    const { env, store } = envWith(baseBuild);
+    vi.mocked(pollGitHubRun).mockResolvedValueOnce({
+      status: "failed",
+      progress: 100,
+      run_url: baseBuild.github_run_url!,
+    });
+
+    const response = await handleBuildStatus(env, baseBuild.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.status).toBe("failed");
+    expect(resolveArtifacts).not.toHaveBeenCalled();
+    const persisted = storedRecord(store, baseBuild.build_id);
+    expect(persisted.status).toBe("failed");
+    expect(persisted.error).toBe("Build failed");
+    expect(releaseBuildLock).toHaveBeenCalledTimes(1);
+  });
+
+  // (e) artifact resolves on the first try → immediate terminal success
+  it("reports success immediately when the artifact resolves first try", async () => {
+    const { env, store } = envWith(baseBuild);
+    ghSuccess();
+    vi.mocked(resolveArtifacts).mockResolvedValueOnce(ARTIFACT);
+
+    const response = await handleBuildStatus(env, baseBuild.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    expect(data.status).toBe("success");
+    expect(data.artifact).toEqual(ARTIFACT);
+    expect(resolveArtifacts).toHaveBeenCalledTimes(1);
+
+    const persisted = storedRecord(store, baseBuild.build_id);
+    expect(persisted.status).toBe("success");
+    expect(persisted.artifact_resolve_attempts).toBeUndefined();
+    expect(releaseBuildLock).toHaveBeenCalledTimes(1);
+  });
+
+  // (f) deferred response keeps the 8-key shape; counter never leaks
+  it("keeps the response shape while deferring", async () => {
+    const { env } = envWith(baseBuild);
+    ghSuccess();
+
+    const response = await handleBuildStatus(env, baseBuild.build_id);
     const data = (await response.json()) as Record<string, unknown>;
 
     expect(Object.keys(data).sort()).toEqual([
