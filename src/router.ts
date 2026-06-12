@@ -52,10 +52,12 @@ export async function route(
     return addCors(response);
   }
 
-  // GET /build/:id
+  // GET /build/:id (?refresh=1 forces a GitHub re-poll on terminal
+  // records — ops EPIC-006-D2 contract, ISSUE-6)
   const buildMatch = path.match(/^\/build\/([0-9a-f-]{36})$/);
   if (method === "GET" && buildMatch) {
-    response = await handleBuildStatus(env, buildMatch[1]);
+    const refresh = url.searchParams.get("refresh") === "1";
+    response = await handleBuildStatus(env, buildMatch[1], { refresh });
     return addCors(response);
   }
 
