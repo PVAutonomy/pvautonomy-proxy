@@ -18,6 +18,23 @@ function isTerminal(status: BuildStatus): boolean {
   return TERMINAL_STATES.includes(status);
 }
 
+// ISSUE-14: persist-on-transition. Only these fields change a build's *meaning*
+// to callers and downstream consumers; `progress`/`updated_at` churn on every
+// poll. Gating the non-terminal poll-path write on a change to this signature
+// drops per-build KV writes from ~1/poll (~120/build) to a handful (create +
+// real transitions + bounded deferred-success attempts), keeping the free-tier
+// daily write budget viable. The terminal self-heal (attempt-increment),
+// timeout, and ?refresh=1 paths persist independently and are unaffected.
+function transitionSignature(record: BuildRecord): string {
+  return JSON.stringify([
+    record.status,
+    record.artifact,
+    record.error,
+    record.completed_at ?? null,
+    record.artifact_resolve_attempts ?? 0,
+  ]);
+}
+
 /** GET /build/:id — lazy-refresh from GitHub if non-terminal.
  *
  * ISSUE-6 follow-up (deferred success): a run that GitHub reports as
@@ -49,6 +66,10 @@ export async function handleBuildStatus(
   if (!record) {
     return jsonError(404, `Build not found: ${buildId}`);
   }
+
+  // ISSUE-14: snapshot the meaning-bearing fields before any mutation so the
+  // non-terminal poll path can skip the KV write when nothing transitioned.
+  const beforeSignature = transitionSignature(record);
 
   if (isTerminal(record.status)) {
     if (opts.refresh) {
@@ -159,7 +180,11 @@ export async function handleBuildStatus(
         await releaseBuildLock(env.BUILD_STATE, record.customer_id, record.build_id);
       }
 
-      await persistRecord(env, record);
+      // ISSUE-14: persist only when a meaning-bearing field transitioned;
+      // skip the write for pure progress/updated_at churn between polls.
+      if (transitionSignature(record) !== beforeSignature) {
+        await persistRecord(env, record);
+      }
     } catch {
       // Poll failure is non-fatal; return last known state
     }
