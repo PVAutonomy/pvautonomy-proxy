@@ -545,3 +545,86 @@ describe("handleBuildStatus — deferred success", () => {
     ]);
   });
 });
+
+// ISSUE-14: persist-on-transition. The non-terminal poll path used to write to
+// KV on every poll (~120/build exhausted the free-tier daily write budget).
+// Writes now happen only on a meaning-bearing transition (status / artifact /
+// error / completed_at / artifact_resolve_attempts); pure progress/updated_at
+// churn is skipped. Acceptance: <= 10 BUILD_STATE.put per full build lifecycle.
+describe("handleBuildStatus — ISSUE-14 persist-on-transition", () => {
+  const ARTIFACT: ArtifactInfo = {
+    manifest_url: "https://example.com/manifest.json",
+    firmware_url: "https://example.com/firmware.ota.bin",
+    sha256: "deadbeef",
+    size_bytes: 500000,
+  };
+
+  function envWith(record: BuildRecord): {
+    env: Env;
+    store: Map<string, string>;
+  } {
+    const store = new Map([
+      [`build:${record.build_id}`, JSON.stringify(record)],
+    ]);
+    return { env: createMockEnv(store), store };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does NOT write when a poll changes nothing but progress (no transition)", async () => {
+    const running: BuildRecord = { ...baseBuild, status: "running", progress: 40 };
+    const { env } = envWith(running);
+    vi.mocked(pollGitHubRun).mockResolvedValue({
+      status: "running",
+      progress: 70,
+      run_url: running.github_run_url!,
+    });
+
+    const response = await handleBuildStatus(env, running.build_id);
+    const data = (await response.json()) as Record<string, unknown>;
+
+    // Live progress is still returned to the caller from the in-memory record…
+    expect(data.status).toBe("running");
+    expect(data.progress).toBe(70);
+    // …but the unchanged record is NOT re-persisted.
+    expect(env.BUILD_STATE.put).not.toHaveBeenCalled();
+  });
+
+  it("writes once on a real status transition (dispatched -> running)", async () => {
+    const { env } = envWith(baseBuild); // status "dispatched"
+    // default pollGitHubRun mock reports "running"
+    await handleBuildStatus(env, baseBuild.build_id);
+    expect(env.BUILD_STATE.put).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays within the <=10 write budget across a full build lifecycle", async () => {
+    const { env } = envWith(baseBuild); // dispatched
+    // Phase 1: many running polls (only the first dispatched->running writes)
+    vi.mocked(pollGitHubRun).mockResolvedValue({
+      status: "running",
+      progress: 50,
+      run_url: baseBuild.github_run_url!,
+    });
+    for (let i = 0; i < 25; i++) {
+      await handleBuildStatus(env, baseBuild.build_id);
+    }
+    // Phase 2: run completes and the artifact resolves -> terminal success
+    vi.mocked(pollGitHubRun).mockResolvedValue({
+      status: "success",
+      progress: 100,
+      run_url: baseBuild.github_run_url!,
+    });
+    vi.mocked(resolveArtifacts).mockResolvedValue(ARTIFACT);
+    await handleBuildStatus(env, baseBuild.build_id);
+
+    const putCalls = (
+      env.BUILD_STATE.put as unknown as { mock: { calls: unknown[] } }
+    ).mock.calls.length;
+    // 26 polls → 2 writes (dispatched->running, running->success).
+    // Pre-fix this path wrote once per poll (26). Acceptance: <= 10.
+    expect(putCalls).toBeLessThanOrEqual(10);
+    expect(putCalls).toBe(2);
+  });
+});
