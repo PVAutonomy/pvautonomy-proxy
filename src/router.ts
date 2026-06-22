@@ -5,6 +5,7 @@ import { handleBuildCreate } from "./handlers/build-create.js";
 import { handleBuildStatus } from "./handlers/build-status.js";
 import { handleBuildArtifact } from "./handlers/build-artifact.js";
 import { handleHealth } from "./handlers/health.js";
+import { handleWhoami } from "./handlers/whoami.js";
 
 /** Simple path-based router. */
 export async function route(
@@ -35,6 +36,12 @@ export async function route(
   const auth = await authenticateRequest(request, env);
   if ("error" in auth) {
     return addCors(jsonError(auth.status, auth.error));
+  }
+
+  // GET /whoami — authenticated; returns key-derived customer_id (#96)
+  if (method === "GET" && path === "/whoami") {
+    response = handleWhoami(auth.customer);
+    return addCors(response);
   }
 
   // POST /build
