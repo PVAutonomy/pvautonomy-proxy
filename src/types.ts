@@ -60,6 +60,11 @@ export interface BuildPayload {
   build_contract?: string;
   yaml_content?: string;
   yaml_hash?: string;
+  // P2-f / ADR-0001 P2-b2 (PVAutonomy/pvautonomy-config#97): firmware-defs
+  // bundle version, recorded next to yaml_hash as build provenance. Accepted
+  // and persisted via BuildRecord.payload; NOT forwarded to the GHA workflow
+  // (the compile does not consume it). Format-validated at the proxy edge.
+  defs_version?: string;
   // EPIC-006-B7: HPKE compile-secret envelope. Mutually exclusive with
   // encrypted_secrets — both set is rejected at the proxy edge and again
   // at the workflow.
