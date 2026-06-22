@@ -109,6 +109,27 @@ describe("triggerWorkflowDispatch", () => {
     expect(inputs.ota_required).toBe("");
   });
 
+  it("does not forward defs_version as a workflow input (#97 parity)", async () => {
+    const fetchMock = mockFetchOnce();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await triggerWorkflowDispatch(
+      createEnv(),
+      "build-uuid-defs",
+      "17e9c4",
+      legacyPayload({ defs_version: "1.0.0", yaml_hash: "a".repeat(64) }),
+    );
+
+    const inputs = (mockFetchOnce as unknown as {
+      lastInputs: Record<string, string>;
+    }).lastInputs;
+
+    // defs_version is provenance metadata — accepted + persisted, never a
+    // workflow input. yaml_hash stays a workflow input as before.
+    expect("defs_version" in inputs).toBe(false);
+    expect(inputs.yaml_hash).toBe("a".repeat(64));
+  });
+
   it("forwards build_contract and yaml_content on yaml_authority path", async () => {
     const fetchMock = mockFetchOnce();
     globalThis.fetch = fetchMock as unknown as typeof fetch;

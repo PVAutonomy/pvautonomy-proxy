@@ -27,6 +27,10 @@ const ALLOWED_PAYLOAD_KEYS: ReadonlySet<string> = new Set([
   "compile_secret_envelope",
   "ota_required",
   "device_key",
+  // #97 (ADR-0001 P2-b2): firmware-defs bundle version recorded next to
+  // yaml_hash. Accepted + persisted via BuildRecord.payload; not forwarded
+  // to the GHA workflow.
+  "defs_version",
   // EPIC-006-B7 hotfix #2: HA's ProxyRemoteBuildBackend.start_build()
   // attaches secret_context_hash alongside encrypted_secrets on the
   // legacy non-envelope secret path (build_backend.py line 1733). It is
@@ -45,6 +49,10 @@ const VALID_BUILD_CONTRACTS: ReadonlySet<string> = new Set([
 
 const BUILD_CONTRACT_YAML_AUTHORITY = "yaml_authority";
 const YAML_HASH_RE = /^[a-f0-9]{64}$/i;
+// #97 (ADR-0001 P2-b2): firmware-defs bundle version, e.g. "1.0.0". Moderate
+// shape check — non-empty, version-ish charset, capped length. Provenance
+// metadata only (never forwarded to the workflow).
+const DEFS_VERSION_RE = /^[A-Za-z0-9._+-]{1,64}$/;
 
 // EPIC-006-B7 hotfix #3: HA may send ota_required as either a JSON
 // boolean (Python True/False from build_backend.py) or a string. The
@@ -116,6 +124,7 @@ export function validateBuildRequest(req: unknown): string | null {
     "compile_secret_envelope",
     "device_key",
     "secret_context_hash",
+    "defs_version",
   ];
   for (const field of stringFields) {
     if (p[field] !== undefined && typeof p[field] !== "string") {
@@ -197,6 +206,18 @@ export function validateBuildRequest(req: unknown): string | null {
     !YAML_HASH_RE.test(p.secret_context_hash)
   ) {
     return "payload.secret_context_hash must be 64 hex characters (sha256)";
+  }
+
+  // #97 (ADR-0001 P2-b2): defs_version format check. Optional; when present
+  // it must be a non-empty, version-ish string (the empty string and odd
+  // characters are caller bugs). The stringFields check above already
+  // rejects non-string values. Provenance only — not forwarded to the
+  // workflow; persisted via BuildRecord.payload.
+  if (
+    typeof p.defs_version === "string" &&
+    !DEFS_VERSION_RE.test(p.defs_version)
+  ) {
+    return "payload.defs_version must be 1-64 chars: letters, digits, . _ + -";
   }
 
   // Dual secret path: encrypted_secrets and compile_secret_envelope are

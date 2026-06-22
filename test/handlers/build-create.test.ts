@@ -80,6 +80,47 @@ describe("handleBuildCreate", () => {
     expect(data.run_url).toContain("github.com");
   });
 
+  it("persists defs_version in the BuildRecord payload (#97)", async () => {
+    const store = new Map<string, string>();
+    const env = createMockEnv(store);
+    const body = JSON.stringify({
+      customer_id: "cust-001",
+      device_key: "17e9c4",
+      model: "edge101",
+      build_profile: "production",
+      payload: {
+        registry_file: "inverters/growatt/sph/sph10k.json",
+        device_name: "sph10k-haus-03",
+        defs_version: "1.0.0",
+      },
+    });
+    const request = new Request("https://proxy.test/build", {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await handleBuildCreate(request, env, customer);
+    expect(response.status).toBe(201);
+
+    // The whole validated payload is persisted via BuildRecord.payload —
+    // so defs_version survives without any dedicated record plumbing.
+    const records = [...store.values()]
+      .map((v) => {
+        try {
+          return JSON.parse(v) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((r): r is Record<string, unknown> =>
+        Boolean(r && r["build_id"] && r["payload"]),
+      );
+    expect(records.length).toBeGreaterThan(0);
+    const payload = records[0]["payload"] as Record<string, unknown>;
+    expect(payload.defs_version).toBe("1.0.0");
+  });
+
   it("rejects payload exceeding size limit", async () => {
     const env = createMockEnv();
     (env as Record<string, unknown>).MAX_PAYLOAD_BYTES = "10";

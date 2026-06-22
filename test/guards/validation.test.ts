@@ -485,4 +485,76 @@ describe("validateBuildRequest", () => {
       }),
     ).toBeNull();
   });
+
+  // ── #97: defs_version (ADR-0001 P2-b2) ──────────────────────────────────
+  it("accepts a valid defs_version", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, defs_version: "1.0.0" },
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts a payload without defs_version (optional)", () => {
+    expect(validateBuildRequest(validRequest)).toBeNull();
+  });
+
+  it("rejects an empty defs_version", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, defs_version: "" },
+      }),
+    ).toContain("defs_version");
+  });
+
+  it("rejects a non-string defs_version", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, defs_version: 100 },
+      }),
+    ).toContain("defs_version");
+  });
+
+  it("rejects a malformed defs_version (illegal characters)", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, defs_version: "1.0.0 drop;" },
+      }),
+    ).toContain("defs_version");
+  });
+
+  it("rejects a too-long defs_version", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, defs_version: "1".repeat(65) },
+      }),
+    ).toContain("defs_version");
+  });
+
+  it("still rejects an unknown payload field even with a valid defs_version", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: { ...validRequest.payload, defs_version: "1.0.0", bogus: "x" },
+      }),
+    ).toContain("is not a known field");
+  });
+
+  it("keeps accepting yaml_hash alongside defs_version (no regression)", () => {
+    expect(
+      validateBuildRequest({
+        ...validRequest,
+        payload: {
+          ...validRequest.payload,
+          defs_version: "1.0.0",
+          yaml_hash: "a".repeat(64),
+        },
+      }),
+    ).toBeNull();
+  });
 });
