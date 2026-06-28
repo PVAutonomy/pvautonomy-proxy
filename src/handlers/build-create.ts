@@ -5,6 +5,7 @@ import { validateBuildRequest } from "../guards/validation.js";
 import { checkRateLimit } from "../guards/rate-limit.js";
 import { acquireBuildLock, releaseBuildLock } from "../guards/concurrency.js";
 import { triggerWorkflowDispatch } from "../github/dispatch.js";
+import { sanitizeBuildRecordForPersist } from "../secrets/sanitize.js";
 
 /** POST /build — validate, guard, dispatch, persist. */
 export async function handleBuildCreate(
@@ -104,8 +105,12 @@ export async function handleBuildCreate(
     await releaseBuildLock(env.BUILD_STATE, customer.customer_id, buildId);
   }
 
-  // 8. Persist build record
-  await env.BUILD_STATE.put(buildKey(buildId), JSON.stringify(record), {
+  // 8. Persist build record — sanitized so secret-bearing payload fields
+  // (encrypted_secrets, compile_secret_envelope) never land in KV at rest.
+  // Dispatch (step 7) already used the live req.payload, so redacting the
+  // persisted clone cannot affect the workflow_dispatch. See #141 / #141b.
+  const persistedRecord = sanitizeBuildRecordForPersist(record);
+  await env.BUILD_STATE.put(buildKey(buildId), JSON.stringify(persistedRecord), {
     expirationTtl: BUILD_RECORD_TTL,
   });
 
