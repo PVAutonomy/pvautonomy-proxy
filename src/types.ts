@@ -125,6 +125,15 @@ export interface Env {
   MAX_BUILDS_PER_DAY: string;
   MAX_PAYLOAD_BYTES: string;
   BUILD_TIMEOUT_MS: string;
+
+  // HPKE-1 (pvautonomy-config#139): TEST-only, environment-gated keyset for
+  // GET /build-backend/keys. Holds a pre-signed PUBLIC keyset document as a
+  // JSON string (signed offline; the Worker never holds the Ed25519 root
+  // private key — production ceremony is HPKE-3). When unset, the endpoint
+  // returns 404 so HA's legacy encrypted_secrets fallback stays available
+  // (404/405 are the only fallback triggers the HA verifier honours). NOT a
+  // production binding and never set in the live Managed Build flow yet.
+  HPKE_TEST_KEYSET?: string;
 }
 
 /** Public response shape for GET /build/:id. */

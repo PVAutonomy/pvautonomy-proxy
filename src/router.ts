@@ -6,6 +6,7 @@ import { handleBuildStatus } from "./handlers/build-status.js";
 import { handleBuildArtifact } from "./handlers/build-artifact.js";
 import { handleHealth } from "./handlers/health.js";
 import { handleWhoami } from "./handlers/whoami.js";
+import { handleBuildBackendKeys } from "./handlers/build-backend-keys.js";
 
 /** Simple path-based router. */
 export async function route(
@@ -41,6 +42,14 @@ export async function route(
   // GET /whoami — authenticated; returns key-derived customer_id (#96)
   if (method === "GET" && path === "/whoami") {
     response = handleWhoami(auth.customer);
+    return addCors(response);
+  }
+
+  // GET /build-backend/keys — authenticated; environment-gated TEST keyset
+  // (HPKE-1, pvautonomy-config#139). 404 when no TEST keyset is configured so
+  // HA's legacy fallback path stays available.
+  if (method === "GET" && path === "/build-backend/keys") {
+    response = handleBuildBackendKeys(env);
     return addCors(response);
   }
 
