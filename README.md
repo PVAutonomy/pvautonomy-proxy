@@ -1,6 +1,12 @@
 # pvautonomy-proxy
 PVAutonomy firmware build proxy — brokers GitHub Actions builds for customer HA instances
 
+> **Source of truth & Canary:** this repo is the sole source of truth for the proxy.
+> The old private monorepo copy is frozen as a deploy source, and the existing
+> `pvautonomy-proxy-canary` Worker is **not** yet isolated — see
+> [docs/ops/source-of-truth-and-canary.md](docs/ops/source-of-truth-and-canary.md)
+> (PVAutonomy/pvautonomy-config#141) before any deploy or HPKE live validation.
+
 ## Deployment (ISSUE-7)
 
 The deployed worker version is visible at `GET /health` (`git_sha` +
