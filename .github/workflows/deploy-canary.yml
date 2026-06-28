@@ -1,0 +1,58 @@
+# Canary deploy (pvautonomy-config#141, #141d) — workflow_dispatch ONLY.
+#
+# Deliberately SEPARATE from deploy.yml so a Canary deploy can never be
+# confused with, or accidentally trigger, a Production deploy. This workflow
+# only ever runs `wrangler deploy --env canary`.
+#
+# PREREQUISITE (#141e): this fails until `[env.canary]` exists in wrangler.toml
+# with SEPARATE canary KV namespace ids (see wrangler.canary.example.toml).
+# #141d intentionally does not commit `[env.canary]` (no real canary KV ids
+# yet). The pre-deploy safety check rejects any canary config that reuses the
+# production KV ids or renames the production worker.
+#
+# Reuses the existing CLOUDFLARE_API_TOKEN repo secret (operator-created).
+name: Deploy worker (canary)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Canary config safety check
+        # Fail closed if canary config would share production KV / rename prod.
+        run: node scripts/check-canary-config.mjs wrangler.toml
+
+      - name: Test
+        run: npx vitest run
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Stamp deploy version (git_sha + built_at)
+        run: node scripts/gen-version.mjs
+
+      - name: Deploy canary via wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --env canary
+
+      - name: Summary
+        run: |
+          echo "Deployed CANARY $(git rev-parse --short HEAD)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Verify: GET https://pvautonomy-proxy-canary.pvautonomy-proxy.workers.dev/health (git_sha must match)." >> "$GITHUB_STEP_SUMMARY"

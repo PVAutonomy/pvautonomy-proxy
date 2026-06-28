@@ -1,0 +1,43 @@
+# EXAMPLE ONLY — NOT active wrangler config (wrangler never reads *.example.toml).
+#
+# Intended isolated Canary shape for pvautonomy-config#141 (#141d/#141e).
+# The real `[env.canary]` block is added to wrangler.toml in #141e, once the
+# canary KV namespaces actually exist. Do NOT copy the placeholder ids below
+# into wrangler.toml — #141d deliberately does not invent KV ids.
+#
+# Wrangler environments do NOT inherit top-level [vars]/kv_namespaces — every
+# binding must be redefined under the env. The Canary MUST use SEPARATE KV
+# namespace ids (never the production ids in wrangler.toml).
+
+[env.canary]
+name = "pvautonomy-proxy-canary"
+
+[env.canary.observability]
+enabled = true
+
+[env.canary.vars]
+GITHUB_OWNER = "PVAutonomy"
+GITHUB_REPO = "inverter-registry"
+GITHUB_WORKFLOW_FILE = "build-firmware-on-demand.yml"
+# Lower than production — canary is for validation, not customer volume.
+MAX_BUILDS_PER_DAY = "2"
+MAX_PAYLOAD_BYTES = "65536"
+BUILD_TIMEOUT_MS = "900000"
+# GITHUB_APP_* are intentionally OMITTED for #139 keyset validation so the
+# canary physically cannot mint a GitHub token / dispatch a real build.
+# (Re-add only when build-dispatch E2E on canary is explicitly in scope.)
+
+# SEPARATE canary KV namespaces — create in #141e, then paste the real ids here.
+[[env.canary.kv_namespaces]]
+binding = "BUILD_STATE"
+id = "<CANARY_BUILD_STATE_KV_ID — create in #141e>"
+
+[[env.canary.kv_namespaces]]
+binding = "API_KEYS"
+id = "<CANARY_API_KEYS_KV_ID — create in #141e>"
+
+# Canary secrets (set via `wrangler secret put --env canary` in #141e):
+#   GITHUB_APP_PRIVATE_KEY — OMIT for #139 keyset validation (no real builds).
+#   HPKE_TEST_KEYSET       — the signed TEST keyset (HPKE-1 / #139), canary only.
+# Seed a dedicated NON-PRODUCTION pva_ Build-Key into the canary API_KEYS
+# namespace only — never a real customer key.
