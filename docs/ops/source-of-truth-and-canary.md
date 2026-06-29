@@ -63,28 +63,39 @@ Implemented in this repo (no deploy, no Cloudflare resources created):
   canary cannot dispatch real builds). **Example only — wrangler never reads
   `*.example.toml`.**
 
-`[env.canary]` is **deliberately NOT yet added to `wrangler.toml`**: it requires
-real canary KV namespace ids, which do not exist until #141e. Inventing
-placeholder ids in active config is unsafe (wrangler would treat them as real),
-so the active `wrangler.toml` is unchanged. The canary workflow therefore
-**fails until #141e** adds the real `[env.canary]` block — by design.
+(History: in #141d `[env.canary]` was deliberately deferred because real canary
+KV ids did not exist yet and placeholder ids in active config are unsafe.)
 
-## #141e — operational prerequisites (NOT done here)
+## #141e — operational provisioning
 
-Before the first canary deploy / #139 validation, an operator must:
+**Decision:** the HPKE-validation Canary is a **new clean-slate worker
+`pvautonomy-proxy-hpke-canary`**, not a reuse of the old `pvautonomy-proxy-canary`
+(which carries inherited real secrets and stale lineage; `wrangler deploy` does
+not delete secrets, so a reused worker keeps real build-dispatch credentials).
+The old canary is left untouched and retired later.
 
-1. create a **separate** canary `API_KEYS` KV namespace (new id);
-2. create a **separate** canary `BUILD_STATE` KV namespace (new id);
-3. add `[env.canary]` to `wrangler.toml` with those real ids (use
-   `wrangler.canary.example.toml` as the template; the safety check must pass);
-4. seed a **dedicated non-production** `pva_` Build-Key into the canary
-   `API_KEYS` namespace **only** — never a real customer key;
-5. provision **canary-scoped** vars/secrets only (`wrangler … --env canary`);
-6. **omit** `GITHUB_APP_*` so the canary cannot dispatch real
-   `inverter-registry` builds during #139 keyset validation;
-7. (for #139) set the signed **TEST** `HPKE_TEST_KEYSET` as a canary secret only;
-8. merge the config PR, then run **Deploy worker (canary)**;
-9. verify `GET /health` `git_sha` matches the deployed commit.
+Status:
+
+- **#141e-2 (done):** isolated canary KV namespaces created — `API_KEYS`
+  `198c1f7255e84f8298c128807d56102e`, `BUILD_STATE`
+  `d928e34e235f441a989a7658d76b1191` (both distinct from production).
+- **#141e-3 (this change):** active `[env.canary]` added to `wrangler.toml` for
+  `pvautonomy-proxy-hpke-canary` using those KV ids, `GITHUB_APP_*` omitted; the
+  safety check (`scripts/check-canary-config.mjs`) and tests/template/docs are
+  updated to the new worker name. **No deploy.**
+
+Still required (operator, separate GOs):
+
+1. **#141e-4:** seed a **dedicated non-production** `pva_` Build-Key into the
+   canary `API_KEYS` namespace **only** — never a real customer key; no
+   `GITHUB_APP_*` / `COMPILE_SECRET_KEY` secrets on this worker.
+2. **#141e-5:** run **Deploy worker (canary)** (`workflow_dispatch`); verify
+   `GET /health` `git_sha` matches the deployed commit; check the auth gate
+   (unauth → 401, invalid → 403, valid + no keyset → 404).
+3. **#141e-6 (for #139):** set the signed **TEST** `HPKE_TEST_KEYSET` as a
+   canary-only secret; validate the keyset response.
+
+No production or customer keys are ever copied into the canary.
 
 ### #139 validation sequence (after #141e)
 
