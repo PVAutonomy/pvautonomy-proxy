@@ -89,7 +89,7 @@ name = "pvautonomy-proxy"
 `),
     );
     expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/expected "pvautonomy-proxy-canary"/);
+    expect(r.errors.join(" ")).toMatch(/expected "pvautonomy-proxy-hpke-canary"/);
   });
 
   it("fails when the top-level production worker name is changed", () => {

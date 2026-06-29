@@ -19,7 +19,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 export const PRODUCTION_WORKER_NAME = "pvautonomy-proxy";
-export const CANARY_WORKER_NAME = "pvautonomy-proxy-canary";
+export const CANARY_WORKER_NAME = "pvautonomy-proxy-hpke-canary";
 
 // Production KV namespace ids — must NEVER appear under any [env.canary*] table.
 // Assembled from halves so this guard file itself carries no 32-char literal

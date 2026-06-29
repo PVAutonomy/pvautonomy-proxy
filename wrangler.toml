@@ -34,3 +34,35 @@ preview_id = "6f720b4d2907449d8a743428e091ce6f"
 # GITHUB_APP_PRIVATE_KEY — GitHub App private key as PKCS#8 PEM. GitHub
 #   downloads keys in PKCS#1; convert BEFORE secret put:
 #     openssl pkcs8 -topk8 -nocrypt -in app.pem -out app-pkcs8.pem
+
+# ── Canary environment (pvautonomy-config#141, #141e) ──────────────────────
+# Isolated HPKE-validation Canary. SEPARATE clean-slate worker + SEPARATE KV
+# namespaces (created in #141e-2) — never the production KV ids above. The old
+# `pvautonomy-proxy-canary` worker is deprecated and left untouched.
+#
+# GITHUB_APP_* is deliberately OMITTED so the canary cannot mint a token /
+# dispatch real inverter-registry builds (#139 keyset validation needs none;
+# /build fails closed). HPKE_TEST_KEYSET is set as a canary-only secret later
+# (#141e-6), never here. Deploy is a separate manual step (#141e-5) via the
+# `Deploy worker (canary)` workflow_dispatch.
+[env.canary]
+name = "pvautonomy-proxy-hpke-canary"
+
+[env.canary.observability]
+enabled = true
+
+[env.canary.vars]
+GITHUB_OWNER = "PVAutonomy"
+GITHUB_REPO = "inverter-registry"
+GITHUB_WORKFLOW_FILE = "build-firmware-on-demand.yml"
+MAX_BUILDS_PER_DAY = "2"
+MAX_PAYLOAD_BYTES = "65536"
+BUILD_TIMEOUT_MS = "900000"
+
+[[env.canary.kv_namespaces]]
+binding = "BUILD_STATE"
+id = "d928e34e235f441a989a7658d76b1191"
+
+[[env.canary.kv_namespaces]]
+binding = "API_KEYS"
+id = "198c1f7255e84f8298c128807d56102e"
