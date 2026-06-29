@@ -55,4 +55,4 @@ jobs:
       - name: Summary
         run: |
           echo "Deployed CANARY $(git rev-parse --short HEAD)." >> "$GITHUB_STEP_SUMMARY"
-          echo "Verify: GET https://pvautonomy-proxy-canary.pvautonomy-proxy.workers.dev/health (git_sha must match)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Verify: GET https://pvautonomy-proxy-hpke-canary.pvautonomy-proxy.workers.dev/health (git_sha must match)." >> "$GITHUB_STEP_SUMMARY"
