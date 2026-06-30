@@ -17,7 +17,31 @@ import type { ApiKeyRecord, Env } from "../../src/types.js";
 
 // Low-entropy synthetic markers (gitleaks-safe).
 const ENC_MARKER = "SYNTHETIC-ENCRYPTED-SECRETS-NOT-REAL";
-const ENV_MARKER = '{"v":1,"marker":"SYNTHETIC-ENVELOPE-NOT-REAL"}';
+// #142: the envelope must now pass shape + AAD validation, so use a valid
+// envelope whose AAD binds to makeReq()'s request context. ENV_CT_B64 is the
+// ciphertext value we assert never lands in KV after sanitization.
+const PINNED_ALG =
+  "HPKE-Base-DHKEM_X25519_HKDF_SHA256-HKDF_SHA256-CHACHA20_POLY1305";
+const ENV_CT_B64 = btoa("synthetic-envelope-ciphertext-not-real");
+const VALID_ENVELOPE = JSON.stringify({
+  v: 1,
+  alg: PINNED_ALG,
+  key_id: "bb-2026-06",
+  enc: btoa(String.fromCharCode(...new Uint8Array(32))),
+  ciphertext: ENV_CT_B64,
+  aad: {
+    envelope_v: 1,
+    alg: PINNED_ALG,
+    key_id: "bb-2026-06",
+    build_profile: "production",
+    registry_file: "inverters/growatt/sph/sph10k.json",
+    device_name: "sph10k-haus-03",
+    device_key: "17e9c4",
+    yaml_hash: "a".repeat(64),
+    request_nonce: btoa(String.fromCharCode(...new Uint8Array(16))),
+  },
+  envelope_fingerprint: "0123456789abcdef01234567",
+});
 
 function createMockEnv(store: Map<string, string>): Env {
   _seedTokenCacheForTests("ghp_test");
@@ -117,7 +141,7 @@ describe("build-create persistence sanitizer (#141 / #141b)", () => {
     const env = createMockEnv(store);
 
     const res = await handleBuildCreate(
-      makeReq({ compile_secret_envelope: ENV_MARKER }),
+      makeReq({ compile_secret_envelope: VALID_ENVELOPE }),
       env,
       customer,
     );
@@ -125,11 +149,12 @@ describe("build-create persistence sanitizer (#141 / #141b)", () => {
 
     const calls = vi.mocked(triggerWorkflowDispatch).mock.calls;
     const dispatchedPayload = calls[0][3] as Record<string, unknown>;
-    expect(dispatchedPayload.compile_secret_envelope).toBe(ENV_MARKER);
+    expect(dispatchedPayload.compile_secret_envelope).toBe(VALID_ENVELOPE);
 
     const persisted = persistedBuildRecord(store);
     expect(persisted.payload.compile_secret_envelope).toBe(REDACTED);
-    expect(noStoreValueContains(store, "SYNTHETIC-ENVELOPE-NOT-REAL")).toBe(true);
+    // ciphertext value must not survive anywhere in persisted KV
+    expect(noStoreValueContains(store, ENV_CT_B64)).toBe(true);
   });
 
   it("GET-style response does not expose payload and build still succeeds", async () => {

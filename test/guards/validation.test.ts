@@ -13,6 +13,29 @@ describe("validateBuildRequest", () => {
     },
   };
 
+  // #142: a structurally valid HPKE envelope whose AAD binds to validRequest.
+  const PINNED_ALG =
+    "HPKE-Base-DHKEM_X25519_HKDF_SHA256-HKDF_SHA256-CHACHA20_POLY1305";
+  const validEnvelope = JSON.stringify({
+    v: 1,
+    alg: PINNED_ALG,
+    key_id: "bb-2026-06",
+    enc: btoa(String.fromCharCode(...new Uint8Array(32))),
+    ciphertext: btoa("synthetic-ciphertext-not-real"),
+    aad: {
+      envelope_v: 1,
+      alg: PINNED_ALG,
+      key_id: "bb-2026-06",
+      build_profile: "production",
+      registry_file: "inverters/growatt/sph/sph10k.json",
+      device_name: "sph10k-haus-03",
+      device_key: "17e9c4",
+      yaml_hash: "a".repeat(64),
+      request_nonce: btoa(String.fromCharCode(...new Uint8Array(16))),
+    },
+    envelope_fingerprint: "0123456789abcdef01234567",
+  });
+
   it("accepts a valid request", () => {
     expect(validateBuildRequest(validRequest)).toBeNull();
   });
@@ -224,12 +247,13 @@ describe("validateBuildRequest", () => {
   });
 
   it("accepts compile_secret_envelope alone (HPKE secret path)", () => {
+    // #142: must be a structurally valid envelope whose AAD binds to the request.
     expect(
       validateBuildRequest({
         ...validRequest,
         payload: {
           ...validRequest.payload,
-          compile_secret_envelope: '{"hpke":"v1"}',
+          compile_secret_envelope: validEnvelope,
         },
       }),
     ).toBeNull();
@@ -237,12 +261,9 @@ describe("validateBuildRequest", () => {
 
   it("accepts compile_secret_envelope as a deterministic JSON string (HA wire shape)", () => {
     // HA serializes the sealed envelope deterministically (sorted keys,
-    // compact separators) into a single JSON *string*. The proxy must
-    // accept that string verbatim.
-    const envelopeJson = JSON.stringify(
-      { alg: "HPKE", ciphertext: "abc", enc: "def", key_id: "bb-2026-04", v: 1 },
-      Object.keys({ alg: 0, ciphertext: 0, enc: 0, key_id: 0, v: 0 }).sort(),
-    );
+    // compact separators) into a single JSON *string*. The proxy accepts that
+    // string and (#142) validates its shape + AAD binding.
+    const envelopeJson = validEnvelope;
     expect(typeof envelopeJson).toBe("string");
     expect(
       validateBuildRequest({

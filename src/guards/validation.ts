@@ -1,4 +1,5 @@
 import type { BuildRequest } from "../types.js";
+import { validateCompileSecretEnvelope } from "./compile-secret-envelope.js";
 
 const DEVICE_KEY_RE = /^[a-f0-9]{6}$/i;
 const DEVICE_NAME_RE = /^[a-z0-9][a-z0-9_-]{1,50}$/;
@@ -227,6 +228,21 @@ export function validateBuildRequest(req: unknown): string | null {
     typeof p.compile_secret_envelope === "string" ? p.compile_secret_envelope : "";
   if (legacySecrets.length > 0 && envelopeSecrets.length > 0) {
     return "payload.encrypted_secrets and payload.compile_secret_envelope are mutually exclusive";
+  }
+
+  // #142: when an HPKE compile-secret envelope is present, validate its shape
+  // and that its AAD binds to this request's context, before dispatch. Absent/
+  // empty envelope keeps the legacy behavior unchanged.
+  if (envelopeSecrets.length > 0) {
+    const envErr = validateCompileSecretEnvelope(envelopeSecrets, {
+      device_key: r.device_key as string,
+      build_profile: r.build_profile as string,
+      device_name: p.device_name as string,
+      registry_file: p.registry_file as string,
+      yaml_hash:
+        typeof p.yaml_hash === "string" ? p.yaml_hash : undefined,
+    });
+    if (envErr) return envErr;
   }
 
   return null;
