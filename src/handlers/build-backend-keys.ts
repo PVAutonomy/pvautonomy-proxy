@@ -2,23 +2,33 @@ import type { Env } from "../types.js";
 
 /**
  * GET /build-backend/keys — authenticated (router auth gate), environment-gated
- * TEST-only keyset endpoint. HPKE-1, pvautonomy-config#139.
+ * keyset endpoint. HPKE-1 (#139) TEST path + HPKE-3 (#122, ADR-0003 D-A)
+ * production path.
  *
- * Serves a pre-signed PUBLIC build-backend keyset supplied out-of-band via the
- * HPKE_TEST_KEYSET binding. The Worker holds no signing private key: the
- * Ed25519 root key lives offline and the keyset is signed during the (future,
- * HPKE-3) production ceremony. This endpoint is a pass-through document server,
- * not a signer.
+ * Serves a pre-signed PUBLIC build-backend keyset supplied out-of-band. The
+ * Worker holds no signing private key: the Ed25519 root key lives offline and
+ * the keyset is signed during the (future, HPKE-3) production ceremony. This
+ * endpoint is a pass-through document server, not a signer.
+ *
+ * Binding selection is EXPLICIT via HPKE_KEYSET_TIER (D-A) — never inferred
+ * from hostname or Worker name:
+ * - tier unset | "production" -> serve HPKE_KEYSET, require environment=="production".
+ * - tier "test"               -> serve HPKE_TEST_KEYSET, require environment=="test".
+ * - any other tier value      -> 500 (misconfiguration, fail closed).
+ * Production can therefore never serve the TEST binding and the canary can never
+ * serve the production binding.
  *
  * Fail-closed contract with the HA verifier (pvautonomy_ops/secret_envelope.py
  * verify_signed_keyset / load_or_refresh_keyset):
- * - binding unset/empty  -> 404. 404/405 are the ONLY conditions under which HA
- *   may fall back to the legacy payload.encrypted_secrets path, so an
+ * - selected binding unset/empty -> 404. 404/405 are the ONLY conditions under
+ *   which HA may fall back to the legacy payload.encrypted_secrets path, so an
  *   unconfigured proxy keeps the legacy path working.
- * - binding present but unparseable / wrong shape / carries private material
- *   -> 500 (generic error, no configured bytes echoed). HA fails closed; we
- *   never silently fall back and never leak the misconfigured value.
- * - binding present and a valid PUBLIC keyset document -> 200, served verbatim.
+ * - selected binding present but unparseable / wrong shape / carries private
+ *   material / environment mismatch -> 500 (generic error, no configured bytes
+ *   echoed). HA fails closed; we never silently fall back and never leak the
+ *   misconfigured value.
+ * - selected binding present and a valid PUBLIC keyset document whose
+ *   environment matches the tier -> 200, served verbatim.
  *
  * The signature itself is verified by HA against its pinned Ed25519 root
  * anchors; the proxy only guarantees it never serves private key material.
@@ -49,7 +59,13 @@ const KEYSET_HEADERS: HeadersInit = {
 };
 
 export function handleBuildBackendKeys(env: Env): Response {
-  const raw = env.HPKE_TEST_KEYSET;
+  // D-A: explicit tier selection; unknown tier fails closed (never guesses).
+  const selection = selectKeysetBinding(env);
+  if (selection === null) {
+    return misconfigured();
+  }
+  const { raw, requiredEnvironment } = selection;
+
   if (typeof raw !== "string" || raw.trim() === "") {
     return jsonResponse(
       { error: "build-backend keyset not configured", status: 404 },
@@ -68,7 +84,45 @@ export function handleBuildBackendKeys(env: Env): Response {
     return misconfigured();
   }
 
+  // D-A: the served keyset's declared environment must match the tier this
+  // binding serves. A production binding carrying a "test" keyset (or vice
+  // versa) is a misconfiguration and fails closed — no config bytes echoed.
+  if (!hasEnvironment(parsed, requiredEnvironment)) {
+    return misconfigured();
+  }
+
   return jsonResponse(parsed, 200);
+}
+
+type KeysetSelection = {
+  raw: string | undefined;
+  requiredEnvironment: "production" | "test";
+};
+
+/**
+ * Resolve the keyset binding + required environment from HPKE_KEYSET_TIER.
+ * Returns null for an unrecognised tier so the caller fails closed (500).
+ * Default (unset) is "production" — the safe default: production never serves
+ * the TEST binding, and an unconfigured production Worker still returns 404
+ * (preserving the legacy fallback) rather than leaking test material.
+ */
+function selectKeysetBinding(env: Env): KeysetSelection | null {
+  const tier = env.HPKE_KEYSET_TIER ?? "production";
+  if (tier === "production") {
+    return { raw: env.HPKE_KEYSET, requiredEnvironment: "production" };
+  }
+  if (tier === "test") {
+    return { raw: env.HPKE_TEST_KEYSET, requiredEnvironment: "test" };
+  }
+  return null;
+}
+
+/** True iff doc.keyset.environment strictly equals the required tier string. */
+function hasEnvironment(doc: unknown, expected: "production" | "test"): boolean {
+  if (!isPlainObject(doc)) return false;
+  const keyset = doc.keyset;
+  if (!isPlainObject(keyset)) return false;
+  return keyset.environment === expected;
 }
 
 /** Generic 500 — never include the configured keyset or any of its bytes. */

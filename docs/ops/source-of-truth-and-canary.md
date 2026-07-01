@@ -105,6 +105,28 @@ No production or customer keys are ever copied into the canary.
    (`no-store`, no private fields);
 4. unauthenticated / invalid key → auth rejection, no keyset leak.
 
+### Keyset tier binding (HPKE-3, ADR-0003 D-A)
+
+`GET /build-backend/keys` selects its keyset binding from the explicit
+`HPKE_KEYSET_TIER` var — never from hostname or Worker name:
+
+| Tier (`HPKE_KEYSET_TIER`) | Binding served | Required `keyset.environment` |
+|---|---|---|
+| `"production"` (also the default when unset) | `HPKE_KEYSET` | `"production"` |
+| `"test"` | `HPKE_TEST_KEYSET` | `"test"` |
+
+- The canary sets `HPKE_KEYSET_TIER = "test"` and uses **only** `HPKE_TEST_KEYSET`
+  (this validation flow, #139/#141/G2). It never serves a production keyset.
+- Production sets `HPKE_KEYSET_TIER = "production"` and uses **only** `HPKE_KEYSET`.
+  It never serves the canary `HPKE_TEST_KEYSET`.
+- A selected binding that is unset/empty → `404` (legacy fallback preserved). A
+  present binding that is malformed, carries private material, or whose
+  `environment` does not match the tier → generic `500` (fail closed, no config
+  echoed). An unrecognised tier value → `500`.
+- **G5** sets `HPKE_KEYSET` in production only, after the G3 ceremony and G4
+  keyring injection. This repo change is code + config only — no secret is set
+  and nothing is deployed here.
+
 ## References
 
 - PVAutonomy/pvautonomy-config#141 — source-of-truth split-brain & isolated Canary
