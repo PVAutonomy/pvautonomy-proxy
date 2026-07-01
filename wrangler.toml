@@ -19,6 +19,12 @@ GITHUB_WORKFLOW_FILE = "build-firmware-on-demand.yml"
 MAX_BUILDS_PER_DAY = "10"
 MAX_PAYLOAD_BYTES = "65536"
 BUILD_TIMEOUT_MS = "900000"
+# HPKE-3 (ADR-0003 D-A): explicit keyset tier for GET /build-backend/keys.
+# "production" -> serve the HPKE_KEYSET secret and require the served
+# keyset.environment == "production". The HPKE_KEYSET secret is set only in the
+# future G5 Cloudflare step; until then this path returns 404 (legacy fallback
+# preserved). Production never serves the canary HPKE_TEST_KEYSET.
+HPKE_KEYSET_TIER = "production"
 
 [[kv_namespaces]]
 binding = "BUILD_STATE"
@@ -58,6 +64,11 @@ GITHUB_WORKFLOW_FILE = "build-firmware-on-demand.yml"
 MAX_BUILDS_PER_DAY = "2"
 MAX_PAYLOAD_BYTES = "65536"
 BUILD_TIMEOUT_MS = "900000"
+# HPKE-3 (ADR-0003 D-A): the canary is the TEST tier. GET /build-backend/keys
+# serves the canary-only HPKE_TEST_KEYSET secret and requires the served
+# keyset.environment == "test". The canary never serves a production keyset.
+# Required so a future canary redeploy keeps the #139 TEST behavior.
+HPKE_KEYSET_TIER = "test"
 
 [[env.canary.kv_namespaces]]
 binding = "BUILD_STATE"

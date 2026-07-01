@@ -31,7 +31,13 @@ async function authedEnv(extra: Partial<Env> = {}): Promise<Env> {
   const apiKeys = {
     get: async (key: string) => (key === `key:${hash}` ? record : null),
   } as unknown as KVNamespace;
-  return { API_KEYS: apiKeys, ...extra } as unknown as Env;
+  // Default to the TEST tier so the existing #139 canary suite exercises the
+  // HPKE_TEST_KEYSET path; production-tier cases override via `extra`.
+  return {
+    API_KEYS: apiKeys,
+    HPKE_KEYSET_TIER: "test",
+    ...extra,
+  } as unknown as Env;
 }
 
 function keysRequest(token?: string): Request {
@@ -298,9 +304,93 @@ describe("handleBuildBackendKeys — direct unit", () => {
     // this asserts the handler has no special envelope handling path.
     const doc = validTestKeysetDoc();
     const res = handleBuildBackendKeys({
+      HPKE_KEYSET_TIER: "test",
       HPKE_TEST_KEYSET: JSON.stringify(doc),
     } as Env);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).not.toHaveProperty("compile_secret_envelope");
+  });
+});
+
+describe("GET /build-backend/keys — tier selection + environment enforcement (D-A)", () => {
+  /** A production keyset: same shape as the TEST fixture but environment prod. */
+  function validProdKeysetDoc(): Record<string, unknown> {
+    const doc = validTestKeysetDoc();
+    (doc.keyset as Record<string, unknown>).environment = "production";
+    return doc;
+  }
+
+  it("production tier with no HPKE_KEYSET → 404 (legacy fallback preserved)", async () => {
+    const env = await authedEnv({ HPKE_KEYSET_TIER: "production" });
+    const res = await route(keysRequest(BUILD_KEY), env);
+    expect(res.status).toBe(404);
+  });
+
+  it("production tier with a valid production HPKE_KEYSET → 200", async () => {
+    const env = await authedEnv({
+      HPKE_KEYSET_TIER: "production",
+      HPKE_KEYSET: JSON.stringify(validProdKeysetDoc()),
+    });
+    const res = await route(keysRequest(BUILD_KEY), env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { keyset: { environment: string } };
+    expect(body.keyset.environment).toBe("production");
+  });
+
+  it("production tier rejects a TEST keyset placed in HPKE_KEYSET → 500", async () => {
+    const env = await authedEnv({
+      HPKE_KEYSET_TIER: "production",
+      HPKE_KEYSET: JSON.stringify(validTestKeysetDoc()), // environment: "test"
+    });
+    const res = await route(keysRequest(BUILD_KEY), env);
+    expect(res.status).toBe(500);
+  });
+
+  it("production tier ignores HPKE_TEST_KEYSET entirely → 404", async () => {
+    const env = await authedEnv({
+      HPKE_KEYSET_TIER: "production",
+      HPKE_TEST_KEYSET: JSON.stringify(validTestKeysetDoc()),
+      // no HPKE_KEYSET set
+    });
+    const res = await route(keysRequest(BUILD_KEY), env);
+    expect(res.status).toBe(404);
+  });
+
+  it("test tier ignores HPKE_KEYSET entirely → 404", async () => {
+    const env = await authedEnv({
+      HPKE_KEYSET_TIER: "test",
+      HPKE_KEYSET: JSON.stringify(validProdKeysetDoc()),
+      // no HPKE_TEST_KEYSET set
+    });
+    const res = await route(keysRequest(BUILD_KEY), env);
+    expect(res.status).toBe(404);
+  });
+
+  it("test tier rejects a PRODUCTION keyset placed in HPKE_TEST_KEYSET → 500", async () => {
+    const env = await authedEnv({
+      HPKE_KEYSET_TIER: "test",
+      HPKE_TEST_KEYSET: JSON.stringify(validProdKeysetDoc()), // environment: "production"
+    });
+    const res = await route(keysRequest(BUILD_KEY), env);
+    expect(res.status).toBe(500);
+  });
+
+  it("an unrecognised HPKE_KEYSET_TIER fails closed → 500", async () => {
+    const env = await authedEnv({
+      HPKE_KEYSET_TIER: "staging",
+      HPKE_KEYSET: JSON.stringify(validProdKeysetDoc()),
+      HPKE_TEST_KEYSET: JSON.stringify(validTestKeysetDoc()),
+    });
+    const res = await route(keysRequest(BUILD_KEY), env);
+    expect(res.status).toBe(500);
+  });
+
+  it("default tier (unset) behaves as production → serves valid HPKE_KEYSET", async () => {
+    const env = await authedEnv({
+      HPKE_KEYSET_TIER: undefined,
+      HPKE_KEYSET: JSON.stringify(validProdKeysetDoc()),
+    });
+    const res = await route(keysRequest(BUILD_KEY), env);
+    expect(res.status).toBe(200);
   });
 });

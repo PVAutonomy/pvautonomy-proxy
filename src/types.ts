@@ -134,6 +134,23 @@ export interface Env {
   // (404/405 are the only fallback triggers the HA verifier honours). NOT a
   // production binding and never set in the live Managed Build flow yet.
   HPKE_TEST_KEYSET?: string;
+
+  // HPKE-3 (pvautonomy-config#122, ADR-0003 D-A): PRODUCTION keyset binding.
+  // Holds the pre-signed PUBLIC production keyset (environment "production") as
+  // a JSON string. GET /build-backend/keys serves it only when HPKE_KEYSET_TIER
+  // resolves to "production" (the default). Unset -> 404, so the legacy
+  // encrypted_secrets fallback stays available. Set only in the future G5
+  // Cloudflare step; the Worker never holds a signing private key.
+  HPKE_KEYSET?: string;
+
+  // HPKE-3 (D-A): selects which keyset binding /build-backend/keys serves and
+  // which keyset.environment it requires — no hostname/name inference.
+  //   unset | "production" -> serve HPKE_KEYSET, require environment=="production"
+  //   "test"               -> serve HPKE_TEST_KEYSET, require environment=="test"
+  // The canary sets "test"; production leaves it unset/"production". Any other
+  // value fails closed (500). This guarantees production can never serve a test
+  // keyset and the canary can never serve a production keyset.
+  HPKE_KEYSET_TIER?: string;
 }
 
 /** Public response shape for GET /build/:id. */
